@@ -109,6 +109,18 @@ def cli():
 @click.option(
     "--max-concurrency", default=1, type=int, help="Maximum number of concurrent requests"
 )
+@click.option(
+    "--max-prompt-cache",
+    default=4,
+    type=int,
+    help="Maximum number of cached prompts to store for reuse (default: 4)",
+)
+@click.option(
+    "--cache-min-prefix-length",
+    default=10,
+    type=int,
+    help="Minimum prefix length required for cache reuse (default: 10)",
+)
 @click.option("--queue-timeout", default=300, type=int, help="Request timeout in seconds")
 @click.option("--queue-size", default=100, type=int, help="Maximum queue size for pending requests")
 @click.option(
@@ -192,6 +204,8 @@ def launch(
     port,
     host,
     max_concurrency,
+    max_prompt_cache,
+    cache_min_prefix_length,
     queue_timeout,
     queue_size,
     quantize,
@@ -222,6 +236,8 @@ def launch(
         port=port,
         host=host,
         max_concurrency=max_concurrency,
+        max_prompt_cache=max_prompt_cache,
+        cache_min_prefix_length=cache_min_prefix_length,
         queue_timeout=queue_timeout,
         queue_size=queue_size,
         quantize=quantize,

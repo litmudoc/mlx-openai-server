@@ -27,6 +27,8 @@ class MLXServerConfig:
     port: int = 8000
     host: str = "0.0.0.0"
     max_concurrency: int = 1
+    max_prompt_cache: int = 4
+    cache_min_prefix_length: int = 10
     queue_timeout: int = 300
     queue_size: int = 100
     disable_auto_resize: bool = False

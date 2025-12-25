@@ -1,55 +1,106 @@
+"""MLX LM Handler for text-only language model requests.
+
+This module provides a handler for making requests to MLX text-only language
+models with KVCache reuse support for improved performance.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import gc
 import time
 import uuid
-import asyncio
 from http import HTTPStatus
+from typing import Any, AsyncGenerator
+
 from fastapi import HTTPException
 from loguru import logger
-from ..models.mlx_lm import MLX_LM
+from mlx_lm.models.cache import make_prompt_cache
+
+from ..core.kv_cache_manager import KVCacheManager
 from ..core.queue import RequestQueue
-from .parser import ParserFactory
-from ..utils.errors import create_error_response
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from ..models.mlx_lm import MLX_LM
 from ..schemas.openai import ChatCompletionRequest, EmbeddingRequest, UsageInfo
+from ..utils.errors import create_error_response
+from .parser import ParserFactory
 
 
 class MLXLMHandler:
-    """
-    Handler class for making requests to the underlying MLX text-only language model service.
-    Provides request queuing, metrics tracking, and robust error handling.
+    """Handler for MLX text-only language model requests.
+
+    Provides request queuing, KVCache reuse, metrics tracking, and robust
+    error handling for text generation requests.
     """
 
-    def __init__(self, model_path: str, context_length: int = 32768, max_concurrency: int = 1, enable_auto_tool_choice: bool = False, tool_call_parser: str = None, reasoning_parser: str = None, trust_remote_code: bool = False, chat_template_file: str = None):
-        """
-        Initialize the handler with the specified model path.
-        
-        Args:
-            model_path (str): Path to the model directory.
-            context_length (int): Maximum context length for the model.
-            max_concurrency (int): Maximum number of concurrent model inference tasks.
-            enable_auto_tool_choice (bool): Enable automatic tool choice.
-            tool_call_parser (str): Name of the tool call parser to use (qwen3, glm4_moe, harmony, minimax, ...)
-            reasoning_parser (str): Name of the reasoning parser to use (qwen3, qwen3_next, glm4_moe, harmony, minimax, ...)
-            trust_remote_code (bool): Enable trust_remote_code when loading models.
-            chat_template_file (str): Path to a custom chat template file.
+    def __init__(
+        self,
+        model_path: str,
+        context_length: int = 32768,
+        max_concurrency: int = 1,
+        max_prompt_cache: int = 4,
+        cache_min_prefix_length: int = 10,
+        enable_auto_tool_choice: bool = False,
+        tool_call_parser: str | None = None,
+        reasoning_parser: str | None = None,
+        trust_remote_code: bool = False,
+        chat_template_file: str | None = None,
+    ) -> None:
+        """Initialize the handler with the specified model path.
+
+        Parameters
+        ----------
+        model_path : str
+            Path to the model directory.
+        context_length : int
+            Maximum context length for the model.
+        max_concurrency : int
+            Maximum number of concurrent model inference tasks.
+        max_prompt_cache : int
+            Maximum number of cached prompts to store for reuse.
+        cache_min_prefix_length : int
+            Minimum prefix length required for cache reuse.
+        enable_auto_tool_choice : bool
+            Enable automatic tool choice.
+        tool_call_parser : str | None
+            Name of the tool call parser to use.
+        reasoning_parser : str | None
+            Name of the reasoning parser to use.
+        trust_remote_code : bool
+            Enable trust_remote_code when loading models.
+        chat_template_file : str | None
+            Path to a custom chat template file.
         """
         self.model_path = model_path
-        self.model = MLX_LM(model_path, context_length, trust_remote_code=trust_remote_code, chat_template_file=chat_template_file)
-        self.model_created = int(time.time())  # Store creation time when model is loaded
+        self.model = MLX_LM(
+            model_path,
+            context_length,
+            trust_remote_code=trust_remote_code,
+            chat_template_file=chat_template_file,
+        )
+        self.model_created = int(time.time())
         self.model_type = self.model.get_model_type()
-        
+
         # Store parser configuration
         self.enable_auto_tool_choice = enable_auto_tool_choice
         self.tool_call_parser = tool_call_parser
         self.reasoning_parser = reasoning_parser
-        
+
         # Initialize request queue for text tasks
         self.request_queue = RequestQueue(max_concurrency=max_concurrency)
+
+        # Initialize KVCacheManager for prompt cache reuse
+        self.cache_manager = KVCacheManager(
+            max_cache_count=max_prompt_cache,
+            min_prefix_length=cache_min_prefix_length,
+        )
 
         # Initialize message converter for supported models
         self.converter = ParserFactory.create_converter(self.model_type)
 
-        logger.info(f"Initialized MLXHandler with model path: {model_path}")
+        logger.info(
+            f"Initialized MLXLMHandler with model path: {model_path}, "
+            f"max_prompt_cache={max_prompt_cache}"
+        )
     
     def _create_parsers(self) -> Tuple[Optional[Any], Optional[Any]]:
         """
@@ -100,6 +151,8 @@ class MLXLMHandler:
             )
             return len(input_tokens)
         except Exception as e:
+            if "tool_choice" in kwargs and isinstance(kwargs["tool_choice"], str):
+                logger.warning(f"Tool choice is string: {kwargs['tool_choice']}")
             logger.warning(f"Failed to count message tokens: {str(e)}")
             # Fallback: rough estimate
             total_text = " ".join([msg.get("content", "") for msg in messages if isinstance(msg.get("content"), str)])
@@ -198,7 +251,15 @@ class MLXLMHandler:
                 "stream": True,
                 **model_params
             }
-            response_generator, prompt_tokens = await self.request_queue.submit(request_id, request_data)
+            result = await self.request_queue.submit(request_id, request_data)
+            
+            # Unpack result - streaming returns (generator, prompt_tokens, cache_save_callback)
+            if len(result) == 3:
+                response_generator, prompt_tokens, cache_save_callback = result
+            else:
+                response_generator, prompt_tokens = result
+                cache_save_callback = None
+            
             # Create appropriate parsers for this model type
 
             thinking_parser, tool_parser = self._create_parsers()
@@ -260,6 +321,10 @@ class MLXLMHandler:
                         continue
 
                     yield text
+
+            # Save cache after streaming completes
+            if cache_save_callback:
+                await cache_save_callback()
 
             # Count completion tokens and yield usage info at the end
             completion_text = "".join(completion_chunks)
@@ -401,30 +466,38 @@ class MLXLMHandler:
             logger.error(f"Error in embeddings generation: {str(e)}")
             content = create_error_response(f"Failed to generate embeddings: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
             raise HTTPException(status_code=500, detail=content)
-        
 
-    async def _process_request(self, request_data: Dict[str, Any]) -> str:
+    async def _process_request(
+        self, request_data: dict[str, Any]
+    ) -> tuple[Any, int] | list[float]:
+        """Process a text request with KVCache reuse support.
+
+        This is the worker function for the request queue.
+
+        Parameters
+        ----------
+        request_data : dict[str, Any]
+            Dictionary containing the request data.
+
+        Returns
+        -------
+        tuple[Any, int] | list[float]
+            For text generation: (response, prompt_tokens)
+            For embeddings: list of embeddings
         """
-        Process a text request. This is the worker function for the request queue.
-        
-        Args:
-            request_data: Dictionary containing the request data.
-            
-        Returns:
-            str: The model's response.
-        """
+        entry_id: int | None = None
+
         try:
             # Check if the request is for embeddings
             if request_data.get("type") == "embeddings":
                 result = self.model.get_embeddings(request_data["input"])
-                # Force garbage collection after embeddings
                 gc.collect()
                 return result
 
             # Extract request parameters
             messages = request_data.get("messages", [])
             stream = request_data.get("stream", False)
-            
+
             # Remove these keys from model_params
             model_params = request_data.copy()
             model_params.pop("messages", None)
@@ -434,53 +507,166 @@ class MLXLMHandler:
             if self.converter:
                 refined_messages = self.converter.convert_messages(messages)
             else:
-                # Reformat messages for models without conversion needs
-                refined_messages = []
-                for message in messages:
-                    # Filter out None values
-                    cleaned_message = {k: v for k, v in message.items() if v is not None}
-                    refined_messages.append(cleaned_message)
+                refined_messages = [
+                    {k: v for k, v in msg.items() if v is not None}
+                    for msg in messages
+                ]
 
-            # Call the model
-            response = self.model(
+            # Tokenize for cache lookup
+            chat_template_kwargs = model_params.get("chat_template_kwargs", {})
+            input_tokens = self.model.tokenizer.apply_chat_template(
+                refined_messages,
+                add_generation_prompt=True,
+                **chat_template_kwargs,
+            )
+
+            # Find matching cache
+            cached_kv, prefix_len, entry_id = await self.cache_manager.find_best_match(
+                input_tokens
+            )
+
+            if cached_kv:
+                # Verify cache offset matches expected prefix length
+                cache_offset = cached_kv[0].offset if cached_kv else 0
+                
+                if cache_offset == prefix_len:
+                    # Perfect match - cache ready to use
+                    logger.info(
+                        f"Cache hit: reusing {prefix_len}/{len(input_tokens)} tokens "
+                        f"({prefix_len / len(input_tokens) * 100:.1f}%), "
+                        f"cache_offset={cache_offset}"
+                    )
+                elif cache_offset > prefix_len:
+                    # Cache has more tokens than needed - trim to exact prefix length
+                    trim_amount = cache_offset - prefix_len
+                    logger.info(
+                        f"Cache hit with trim: {prefix_len}/{len(input_tokens)} tokens, "
+                        f"trimming {trim_amount} tokens (offset {cache_offset} -> {prefix_len})"
+                    )
+                    for layer_cache in cached_kv:
+                        if hasattr(layer_cache, 'trim'):
+                            layer_cache.trim(trim_amount)
+                else:
+                    # cache_offset < prefix_len - shouldn't happen with our matching logic
+                    logger.warning(
+                        f"Cache offset too small: offset={cache_offset}, prefix_len={prefix_len}. "
+                        "Creating fresh cache."
+                    )
+                    cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
+                    entry_id = None
+            else:
+                logger.info("Cache miss: creating fresh cache")
+                cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
+
+            # Call the model with cache
+            response, prompt_tokens, cache = self.model(
                 messages=refined_messages,
                 stream=stream,
-                **model_params
-            )            
-            # Force garbage collection after model inference
-            gc.collect()
-            return response
-            
+                prompt_cache=cached_kv,
+                **model_params,
+            )
+
+            if stream:
+                # Wrap generator to save cache after streaming completes
+                # Note: This must be a sync generator since stream_generate returns sync
+                generated_tokens: list[int] = []
+                cache_entry_id = entry_id  # Capture for closure
+
+                def cache_saving_generator():
+                    """Wrapper that saves cache after streaming completes."""
+                    nonlocal generated_tokens
+
+                    try:
+                        for chunk in response:
+                            if chunk and chunk.text:
+                                # Tokenize generated text incrementally
+                                chunk_tokens = self.model.tokenizer.encode(
+                                    chunk.text, add_special_tokens=False
+                                )
+                                generated_tokens.extend(chunk_tokens)
+                            yield chunk
+                    finally:
+                        # Schedule async cache save (will be awaited by caller)
+                        pass  # Cache save is handled by the caller
+
+                # Return generator and a callback to save cache
+                def get_cache_save_callback():
+                    """Return callback to save cache after streaming."""
+
+                    async def save():
+                        try:
+                            # Only save prompt tokens (not generated) for prefix matching
+                            await self.cache_manager.save_cache(
+                                cache=cache,
+                                token_ids=input_tokens,
+                                entry_id=cache_entry_id,
+                            )
+                            logger.info(
+                                f"Cache saved (streaming): {len(input_tokens)} prompt tokens"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to save cache: {e}")
+                            await self.cache_manager.unlock_entry(cache_entry_id)
+
+                    return save
+
+                gc.collect()
+                # Return tuple: (generator, prompt_tokens, cache_save_callback)
+                return cache_saving_generator(), prompt_tokens, get_cache_save_callback()
+
+            else:
+                # Non-streaming: save cache immediately
+                # Only save prompt tokens (not generated) for prefix matching
+                try:
+                    await self.cache_manager.save_cache(
+                        cache=cache,
+                        token_ids=input_tokens,
+                        entry_id=entry_id,
+                    )
+                    logger.info(f"Cache saved (non-streaming): {len(input_tokens)} prompt tokens")
+                except Exception as e:
+                    logger.warning(f"Failed to save cache: {e}")
+                    await self.cache_manager.unlock_entry(entry_id)
+
+                gc.collect()
+                return response, prompt_tokens
+
         except Exception as e:
             logger.error(f"Error processing text request: {str(e)}")
-            # Clean up on error
+            # Unlock cache entry on error
+            if entry_id is not None:
+                await self.cache_manager.unlock_entry(entry_id)
             gc.collect()
             raise
 
-    async def get_queue_stats(self) -> Dict[str, Any]:
-        """
-        Get statistics from the request queue and performance metrics.
-        
-        Returns:
-            Dict with queue and performance statistics.
+    async def get_queue_stats(self) -> dict[str, Any]:
+        """Get statistics from the request queue and cache manager.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary with queue and cache statistics.
         """
         queue_stats = self.request_queue.get_queue_stats()
-        
+        cache_stats = await self.cache_manager.get_stats()
+
         return {
             "queue_stats": queue_stats,
+            "cache_stats": cache_stats,
         }
-        
-    async def cleanup(self):
-        """
-        Cleanup resources and stop the request queue before shutdown.
-        
+
+    async def cleanup(self) -> None:
+        """Cleanup resources and stop the request queue before shutdown.
+
         This method ensures all pending requests are properly cancelled
         and resources are released.
         """
         try:
             logger.info("Cleaning up MLXLMHandler resources")
-            if hasattr(self, 'request_queue'):
+            if hasattr(self, "request_queue"):
                 await self.request_queue.stop()
+            if hasattr(self, "cache_manager"):
+                await self.cache_manager.clear()
             logger.info("MLXLMHandler cleanup completed successfully")
         except Exception as e:
             logger.error(f"Error during MLXLMHandler cleanup: {str(e)}")

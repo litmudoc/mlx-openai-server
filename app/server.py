@@ -25,6 +25,7 @@ from loguru import logger
 
 from .api.endpoints import router
 from .config import MLXServerConfig
+from .core.cache_patch import apply_cache_patch
 from .handler import MLXFluxHandler
 from .handler.mlx_embeddings import MLXEmbeddingsHandler
 from .handler.mlx_lm import MLXLMHandler
@@ -142,6 +143,9 @@ def create_lifespan(config_args: MLXServerConfig):
             FastAPI application instance being started.
         """
         try:
+            # Apply cache patches for proper offset tracking (idempotent)
+            apply_cache_patch()
+
             model_identifier = get_model_identifier(config_args)
             if config_args.model_type == "image-generation":
                 logger.info(f"Initializing MLX handler with model name: {model_identifier}")
@@ -199,6 +203,8 @@ def create_lifespan(config_args: MLXServerConfig):
                     model_path=model_identifier,
                     context_length=config_args.context_length,
                     max_concurrency=config_args.max_concurrency,
+                    max_prompt_cache=config_args.max_prompt_cache,
+                    cache_min_prefix_length=config_args.cache_min_prefix_length,
                     enable_auto_tool_choice=config_args.enable_auto_tool_choice,
                     tool_call_parser=config_args.tool_call_parser,
                     reasoning_parser=config_args.reasoning_parser,
