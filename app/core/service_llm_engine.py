@@ -5,6 +5,8 @@ from typing import Any
 from loguru import logger
 import mlx.core as mx
 
+from app.core.gpt_oss_patch import patch_gpt_oss_model
+
 
 class GenerationContext:
     """Controls the lifecycle of a generation request."""
@@ -18,6 +20,7 @@ class GenerationContext:
     @property
     def is_cancelled(self):
         return self._cancel_flag.is_set()
+
 
 class StopSequenceHandler:
     """Handles stop sequences for generation with partial match buffering."""
@@ -39,7 +42,7 @@ class StopSequenceHandler:
             if stop_seq in self.current_text:
                 stop_index = self.current_text.find(stop_seq)
                 final_chunk = self.current_text[:stop_index]
-                self.current_text = "" # Clear buffer
+                self.current_text = ""  # Clear buffer
                 return final_chunk, True
 
         # 2. Check for partial match to buffer
@@ -68,6 +71,7 @@ class StopSequenceHandler:
         self.current_text = ""
         return chunk, False
 
+
 class ServiceLLMEngine:
     """
     Core LLM generation engine with support for:
@@ -79,6 +83,10 @@ class ServiceLLMEngine:
         self.model = model
         self.tokenizer = tokenizer
 
+        # Apply gpt-oss patch for mixed attention models
+        # This fixes mask broadcasting issues with chunked prefill
+        self._is_patched_gpt_oss = patch_gpt_oss_model(model)
+
     def generate_stream(
         self,
         prompt_tokens: mx.array,
@@ -87,7 +95,7 @@ class ServiceLLMEngine:
         max_tokens: int = 100,
         sampler: Any = None,
         stop_sequences: list[str] = None,
-        logits_processors: list[Any] = None
+        logits_processors: list[Any] = None,
     ) -> Generator[str, None, None]:
         """
         Stream generation with explicit cancellation support and chunked prefill.
@@ -111,7 +119,11 @@ class ServiceLLMEngine:
         # we just process them.
         # But for Chunked Prefill, we need to handle the case where input_tokens is large.
 
-        batch_size = 512 # Preprocess batch size
+        # Chunked prefill configuration.
+        # With gpt-oss patch applied, all models can use chunked prefill.
+        # The patch fixes mask broadcasting issues for mixed attention models.
+        # See analysis/gpt_oss_chunked_prefill_issue.md for details.
+        batch_size = 512  # Default prefill batch size
 
         # input_tokens is expected to be [1, N] or [N]
         if len(prompt_tokens.shape) == 1:
@@ -119,6 +131,7 @@ class ServiceLLMEngine:
 
         N = prompt_tokens.shape[1]
 
+        # Chunked prefill for all models (gpt-oss is patched in __init__)
         for i in range(0, N - 1, batch_size):
             if context.is_cancelled:
                 logger.info("Request cancelled during prefill.")

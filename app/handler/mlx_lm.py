@@ -102,7 +102,7 @@ class MLXLMHandler:
             f"Initialized MLXLMHandler with model path: {model_path}, "
             f"max_prompt_cache={max_prompt_cache}"
         )
-    
+
     def _create_parsers(self) -> Tuple[Optional[Any], Optional[Any]]:
         """
         Create appropriate parsers based on model type and available tools.
@@ -133,6 +133,72 @@ class MLXLMHandler:
         tokens = self.model.tokenizer.encode(text, add_special_tokens=False)
         return len(tokens)
 
+    def _convert_tool_calls_for_template(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Convert tool_calls arguments from JSON string to dict for chat template.
+
+        Some chat templates (e.g., Qwen3) expect tool_calls[].function.arguments
+        to be a dict, but OpenAI API spec uses JSON strings. This method converts
+        the arguments to dict format for template compatibility.
+
+        Parameters
+        ----------
+        messages : list[dict]
+            List of messages that may contain tool_calls.
+
+        Returns
+        -------
+        list[dict]
+            Messages with tool_calls arguments converted to dict.
+        """
+        import json
+
+        converted = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                converted.append(msg)
+                continue
+
+            # Check if message has tool_calls
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls or not isinstance(tool_calls, list):
+                converted.append(msg)
+                continue
+
+            # Deep copy and convert
+            new_msg = msg.copy()
+            new_tool_calls = []
+
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    new_tool_calls.append(tc)
+                    continue
+
+                new_tc = tc.copy()
+                function = tc.get("function")
+
+                if function and isinstance(function, dict):
+                    new_function = function.copy()
+                    args = function.get("arguments")
+
+                    # Convert string arguments to dict
+                    if isinstance(args, str):
+                        try:
+                            new_function["arguments"] = json.loads(args)
+                        except json.JSONDecodeError:
+                            # Keep as string if parsing fails
+                            pass
+
+                    new_tc["function"] = new_function
+
+                new_tool_calls.append(new_tc)
+
+            new_msg["tool_calls"] = new_tool_calls
+            converted.append(new_msg)
+
+        return converted
+
     def _count_message_tokens(self, messages: List[Dict[str, str]], **kwargs) -> int:
         """
         Count the number of tokens in a list of messages after applying chat template.
@@ -146,9 +212,7 @@ class MLXLMHandler:
         """
         try:
             input_tokens = self.model.tokenizer.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                **kwargs
+                messages, add_generation_prompt=True, **kwargs
             )
             return len(input_tokens)
         except Exception as e:
@@ -178,26 +242,23 @@ class MLXLMHandler:
         }
 
         # Add context length
-        if hasattr(self.model, 'max_kv_size'):
+        if hasattr(self.model, "max_kv_size"):
             metadata["context_length"] = self.model.max_kv_size
 
         # Add vocab size if available
-        if hasattr(self.model.tokenizer, 'vocab_size'):
+        if hasattr(self.model.tokenizer, "vocab_size"):
             metadata["vocab_size"] = self.model.tokenizer.vocab_size
 
         # Add model family/type if available
-        if hasattr(self.model, 'model_type') and self.model.model_type:
+        if hasattr(self.model, "model_type") and self.model.model_type:
             metadata["model_family"] = self.model.model_type
 
         # Add dtype info if available from model config
-        if hasattr(self.model.model, 'dtype'):
+        if hasattr(self.model.model, "dtype"):
             metadata["dtype"] = str(self.model.model.dtype)
 
         # Add load settings
-        metadata["load_settings"] = {
-            "model_path": self.model_path,
-            "model_type": "lm"
-        }
+        metadata["load_settings"] = {"model_path": self.model_path, "model_type": "lm"}
 
         return metadata
 
@@ -206,42 +267,40 @@ class MLXLMHandler:
         Get list of available models with their metadata.
         """
         try:
-            return [{
-                "id": self.model_path,
-                "object": "model",
-                "created": self.model_created,
-                "owned_by": "local",
-                "metadata": self._extract_model_metadata()
-            }]
+            return [
+                {
+                    "id": self.model_path,
+                    "object": "model",
+                    "created": self.model_created,
+                    "owned_by": "local",
+                    "metadata": self._extract_model_metadata(),
+                }
+            ]
         except Exception as e:
             logger.error(f"Error getting models: {str(e)}")
             return []
-    
+
     async def initialize(self, queue_config: Optional[Dict[str, Any]] = None):
         """Initialize the handler and start the request queue."""
         if not queue_config:
-            queue_config = {
-                "max_concurrency": 1,
-                "timeout": 300,
-                "queue_size": 100
-            }
+            queue_config = {"max_concurrency": 1, "timeout": 300, "queue_size": 100}
         self.request_queue = RequestQueue(
             max_concurrency=queue_config.get("max_concurrency"),
             timeout=queue_config.get("timeout"),
-            queue_size=queue_config.get("queue_size")
+            queue_size=queue_config.get("queue_size"),
         )
         await self.request_queue.start(self._process_request)
         logger.info("Initialized MLXHandler and started request queue")
 
     def _run_model_sync(
-        self, 
-        loop: asyncio.AbstractEventLoop, 
+        self,
+        loop: asyncio.AbstractEventLoop,
         request_data: dict[str, Any],
-        stream_queue: Optional[asyncio.Queue] = None
-    ) -> Any: 
+        stream_queue: Optional[asyncio.Queue] = None,
+    ) -> Any:
         """Run model generation in a separate thread."""
         try:
-             # Check if the request is for embeddings
+            # Check if the request is for embeddings
             if request_data.get("type") == "embeddings":
                 result = self.model.get_embeddings(request_data["input"])
                 gc.collect()
@@ -262,7 +321,7 @@ class MLXLMHandler:
             model_params.pop("_cached_kv", None)
             model_params.pop("_input_tokens", None)
             model_params.pop("_entry_id", None)
-            
+
             # Helper to put items in queue safely
             def put_in_queue(item):
                 if stream_queue:
@@ -273,25 +332,26 @@ class MLXLMHandler:
                 refined_messages = self.converter.convert_messages(messages)
             else:
                 refined_messages = [
-                    {k: v for k, v in msg.items() if v is not None}
-                    for msg in messages
+                    {k: v for k, v in msg.items() if v is not None} for msg in messages
                 ]
-            
+
             # Use cached_kv passed from _process_request
             cached_kv = request_data.get("_cached_kv")
-            input_tokens = request_data.get("_input_tokens") # This might be None if cache lookup failed or wasn't done?
+            input_tokens = request_data.get(
+                "_input_tokens"
+            )  # This might be None if cache lookup failed or wasn't done?
             entry_id = request_data.get("_entry_id")
 
             # Fallback if input_tokens not provided (shouldn't happen with updated logic)
             if input_tokens is None:
-                 # Re-tokenize
+                # Re-tokenize
                 chat_template_kwargs = model_params.get("chat_template_kwargs", {})
                 input_tokens = self.model.tokenizer.apply_chat_template(
                     refined_messages,
                     add_generation_prompt=True,
                     **chat_template_kwargs,
                 )
-            
+
             # Call the model with cache
             response, prompt_tokens, cache = self.model(
                 messages=refined_messages,
@@ -304,10 +364,10 @@ class MLXLMHandler:
             if stream and stream_queue:
                 # Iterate generator
                 generated_tokens = []
-                
+
                 try:
                     for chunk in response:
-                        if chunk: # Check chunk validity
+                        if chunk:  # Check chunk validity
                             text = chunk if isinstance(chunk, str) else chunk.text
                             if text:
                                 chunk_tokens = self.model.tokenizer.encode(
@@ -315,9 +375,9 @@ class MLXLMHandler:
                                 )
                                 generated_tokens.extend(chunk_tokens)
                             put_in_queue(chunk)
-                    
+
                     # Done streaming
-                    # We need to save cache. 
+                    # We need to save cache.
                     # `cache_manager.save_cache` is async.
                     # Schedule it on the main loop.
                     async def save_cache_async():
@@ -335,7 +395,7 @@ class MLXLMHandler:
                             await self.cache_manager.unlock_entry(entry_id)
 
                     future = asyncio.run_coroutine_threadsafe(save_cache_async(), loop)
-                    
+
                     # Signal done
                     put_in_queue(None)
 
@@ -343,17 +403,21 @@ class MLXLMHandler:
                     put_in_queue(e)
                     # Also unlock cache if failed
                     if entry_id is not None:
-                        asyncio.run_coroutine_threadsafe(self.cache_manager.unlock_entry(entry_id), loop)
+                        asyncio.run_coroutine_threadsafe(
+                            self.cache_manager.unlock_entry(entry_id), loop
+                        )
 
             else:
                 # Non-streaming
                 # Tokenize response
-                response_text = response if isinstance(response, str) else response.get("content", "")
+                response_text = (
+                    response if isinstance(response, str) else response.get("content", "")
+                )
                 generated_tokens = self.model.tokenizer.encode(
                     response_text, add_special_tokens=False
                 )
                 full_token_ids = input_tokens + generated_tokens
-                
+
                 # Save cache async
                 async def save_cache_sync_async():
                     try:
@@ -365,9 +429,9 @@ class MLXLMHandler:
                     except Exception as e:
                         if entry_id is not None:
                             await self.cache_manager.unlock_entry(entry_id)
-                
+
                 asyncio.run_coroutine_threadsafe(save_cache_sync_async(), loop)
-                
+
                 gc.collect()
                 return response, prompt_tokens
 
@@ -376,7 +440,9 @@ class MLXLMHandler:
                 put_in_queue(e)
             raise e
 
-    async def generate_text_stream(self, request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
+    async def generate_text_stream(
+        self, request: ChatCompletionRequest
+    ) -> AsyncGenerator[str, None]:
         """
         Generate a streaming response for text-only chat completion requests.
         Uses the request queue for handling concurrent requests.
@@ -403,12 +469,12 @@ class MLXLMHandler:
                 "stream": True,
                 "context": context,
                 "stream_queue": stream_queue,
-                **model_params
+                **model_params,
             }
-            
+
             # Enqueue request - this adds to queue but doesn't block for result
             await self.request_queue.enqueue(request_id, request_data)
-            
+
             # Create appropriate parsers for this model type
             thinking_parser, tool_parser = self._create_parsers()
 
@@ -424,19 +490,19 @@ class MLXLMHandler:
             # Consume queue
             while True:
                 item = await stream_queue.get()
-                
+
                 if item is None:
                     break
-                
+
                 if isinstance(item, Exception):
                     raise item
-                
+
                 # MLX_LM yields object with .text usually, or str?
                 # engine yields str. MLX_LM yields engine generator (str).
                 chunk_text = item
-                if not isinstance(item, str) and hasattr(item, 'text'):
-                     chunk_text = item.text
-                
+                if not isinstance(item, str) and hasattr(item, "text"):
+                    chunk_text = item.text
+
                 if not chunk_text:
                     continue
 
@@ -448,10 +514,12 @@ class MLXLMHandler:
                     if parsed_content:
                         yield parsed_content
                     if is_complete:
-                         pass
+                        pass
                 else:
                     if is_first_chunk:
-                        if thinking_parser and ParserFactory.needs_redacted_reasoning_prefix(self.reasoning_parser):
+                        if thinking_parser and ParserFactory.needs_redacted_reasoning_prefix(
+                            self.reasoning_parser
+                        ):
                             text = thinking_parser.get_thinking_open() + text
                         is_first_chunk = False
 
@@ -468,7 +536,7 @@ class MLXLMHandler:
                             text = after_thinking_close_content
                         else:
                             continue
-                        
+
                     if tool_parser:
                         parsed_content, is_complete = tool_parser.parse_stream(text)
                         if is_complete:
@@ -486,7 +554,7 @@ class MLXLMHandler:
                 "__usage__": UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=total_tokens
+                    total_tokens=total_tokens,
                 )
             }
 
@@ -497,12 +565,20 @@ class MLXLMHandler:
         except asyncio.QueueFull:
             context.cancel()
             logger.error("Too many requests. Service is at capacity.")
-            content = create_error_response("Too many requests. Service is at capacity.", "rate_limit_exceeded", HTTPStatus.TOO_MANY_REQUESTS)
+            content = create_error_response(
+                "Too many requests. Service is at capacity.",
+                "rate_limit_exceeded",
+                HTTPStatus.TOO_MANY_REQUESTS,
+            )
             raise HTTPException(status_code=429, detail=content)
         except Exception as e:
             context.cancel()
             logger.error(f"Error in text stream generation for request {request_id}: {str(e)}")
-            content = create_error_response(f"Failed to generate text stream: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
+            content = create_error_response(
+                f"Failed to generate text stream: {str(e)}",
+                "server_error",
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             raise HTTPException(status_code=500, detail=content)
         finally:
             context.cancel()
@@ -532,19 +608,21 @@ class MLXLMHandler:
                 "messages": chat_messages,
                 "stream": False,
                 "context": context,
-                **model_params
+                **model_params,
             }
             response, prompt_tokens = await self.request_queue.submit(request_id, request_data)
 
             # Count completion tokens
-            completion_tokens = self._count_tokens(response if isinstance(response, str) else response.get("content", ""))
+            completion_tokens = self._count_tokens(
+                response if isinstance(response, str) else response.get("content", "")
+            )
             total_tokens = prompt_tokens + completion_tokens
 
             # Create usage info
             usage = UsageInfo(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=total_tokens
+                total_tokens=total_tokens,
             )
 
             # Create appropriate parsers for this model type
@@ -566,16 +644,13 @@ class MLXLMHandler:
                 parsed = thinking_parser.parse(response_text)
                 return {"response": parsed, "usage": usage}
 
-
-            if thinking_parser and ParserFactory.needs_redacted_reasoning_prefix(self.reasoning_parser):
+            if thinking_parser and ParserFactory.needs_redacted_reasoning_prefix(
+                self.reasoning_parser
+            ):
                 # Add thinking tag to response for parsers that need it
                 response_text = thinking_parser.get_thinking_open() + response_text
 
-            parsed_response = {
-                "reasoning_content": None,
-                "tool_calls": None,
-                "content": None
-            }
+            parsed_response = {"reasoning_content": None, "tool_calls": None, "content": None}
 
             if thinking_parser:
                 thinking_response, response_text = thinking_parser.parse(response_text)
@@ -587,7 +662,7 @@ class MLXLMHandler:
             parsed_response["content"] = response_text
 
             return {"response": parsed_response, "usage": usage}
-        
+
         except asyncio.CancelledError:
             logger.info(f"Request {request_id} cancelled.")
             context.cancel()
@@ -595,21 +670,29 @@ class MLXLMHandler:
         except asyncio.QueueFull:
             context.cancel()
             logger.error("Too many requests. Service is at capacity.")
-            content = create_error_response("Too many requests. Service is at capacity.", "rate_limit_exceeded", HTTPStatus.TOO_MANY_REQUESTS)
+            content = create_error_response(
+                "Too many requests. Service is at capacity.",
+                "rate_limit_exceeded",
+                HTTPStatus.TOO_MANY_REQUESTS,
+            )
             raise HTTPException(status_code=429, detail=content)
         except Exception as e:
             context.cancel()
             logger.error(f"Error in text response generation: {str(e)}")
-            content = create_error_response(f"Failed to generate text response: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
+            content = create_error_response(
+                f"Failed to generate text response: {str(e)}",
+                "server_error",
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             raise HTTPException(status_code=500, detail=content)
-        
+
     async def generate_embeddings_response(self, request: EmbeddingRequest):
         """
         Generate embeddings for a given text input.
-        
+
         Args:
             request: EmbeddingRequest object containing the text input.
-        
+
         Returns:
             List[float]: Embeddings for the input text.
         """
@@ -618,11 +701,7 @@ class MLXLMHandler:
             request_id = f"embeddings-{uuid.uuid4()}"
             if isinstance(request.input, str):
                 request.input = [request.input]
-            request_data = {
-                "type": "embeddings",
-                "input": request.input,
-                "model": request.model
-            }
+            request_data = {"type": "embeddings", "input": request.input, "model": request.model}
 
             # Submit to the request queue
             response = await self.request_queue.submit(request_id, request_data)
@@ -631,13 +710,14 @@ class MLXLMHandler:
 
         except Exception as e:
             logger.error(f"Error in embeddings generation: {str(e)}")
-            content = create_error_response(f"Failed to generate embeddings: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
+            content = create_error_response(
+                f"Failed to generate embeddings: {str(e)}",
+                "server_error",
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
             raise HTTPException(status_code=500, detail=content)
 
-    async def _process_request(
-        self,
-        request_data: dict[str, Any]
-    ) -> tuple[Any, int] | list[float]:
+    async def _process_request(self, request_data: dict[str, Any]) -> tuple[Any, int] | list[float]:
         """Process a text request with KVCache reuse support.
 
         This is the worker function for the request queue.
@@ -670,9 +750,15 @@ class MLXLMHandler:
                 refined_messages = self.converter.convert_messages(messages)
             else:
                 refined_messages = [
-                    {k: v for k, v in msg.items() if v is not None}
-                    for msg in messages
+                    {k: v for k, v in msg.items() if v is not None} for msg in messages
                 ]
+
+            # Convert tool_calls arguments from JSON string to dict for chat template
+            # Some chat templates (e.g., Qwen3) expect arguments as dict, not string
+            refined_messages = self._convert_tool_calls_for_template(refined_messages)
+
+            # Update request_data with converted messages for downstream processing
+            request_data["messages"] = refined_messages
 
             # Re-tokenize for cache lookup
             # We must do this because we need input_tokens for cache lookup
@@ -685,14 +771,12 @@ class MLXLMHandler:
             )
 
             # Find matching cache
-            cached_kv, prefix_len, entry_id = await self.cache_manager.find_best_match(
-                input_tokens
-            )
+            cached_kv, prefix_len, entry_id = await self.cache_manager.find_best_match(input_tokens)
 
             if cached_kv:
                 # Verify cache offset matches expected prefix length
                 cache_offset = cached_kv[0].offset if cached_kv else 0
-                
+
                 if cache_offset == prefix_len:
                     # Perfect match - cache ready to use
                     logger.info(
@@ -708,7 +792,7 @@ class MLXLMHandler:
                         f"trimming {trim_amount} tokens (offset {cache_offset} -> {prefix_len})"
                     )
                     for layer_cache in cached_kv:
-                        if hasattr(layer_cache, 'trim'):
+                        if hasattr(layer_cache, "trim"):
                             layer_cache.trim(trim_amount)
                 else:
                     # cache_offset < prefix_len - shouldn't happen with our matching logic
@@ -726,15 +810,17 @@ class MLXLMHandler:
             request_data["_cached_kv"] = cached_kv
             request_data["_input_tokens"] = input_tokens
             request_data["_entry_id"] = entry_id
-            
+
             # Offload to thread
             loop = asyncio.get_running_loop()
             result = await asyncio.to_thread(self._run_model_sync, loop, request_data, stream_queue)
-            
+
             return result
 
         except Exception as e:
-            logger.error(f"Error processing text request: {str(e)}")
+            import traceback
+
+            logger.error(f"Error processing text request: {str(e)}\n{traceback.format_exc()}")
             # Unlock cache entry on error
             if entry_id is not None:
                 await self.cache_manager.unlock_entry(entry_id)
@@ -774,13 +860,15 @@ class MLXLMHandler:
             logger.error(f"Error during MLXLMHandler cleanup: {str(e)}")
             raise
 
-    async def _prepare_text_request(self, request: ChatCompletionRequest) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+    async def _prepare_text_request(
+        self, request: ChatCompletionRequest
+    ) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
         """
         Prepare a text request by parsing model parameters and verifying the format of messages.
-        
+
         Args:
             request: ChatCompletionRequest object containing the messages.
-        
+
         Returns:
             Tuple containing the formatted chat messages and model parameters.
         """
@@ -788,7 +876,7 @@ class MLXLMHandler:
             request_dict = request.model_dump()
             tools = request_dict.pop("tools", None)
             tool_choice = request_dict.pop("tool_choice", None)
-            
+
             if tools:
                 # Enable auto tool choice if requested via CLI flag
                 if self.enable_auto_tool_choice and tool_choice == "auto":
@@ -800,13 +888,15 @@ class MLXLMHandler:
             if request_dict.get("response_format", None):
                 response_format = request_dict.pop("response_format", None)
                 if response_format.get("type") == "json_schema":
-                    request_dict["schema"] = response_format.get("json_schema", None).get("schema", None)
-            
+                    request_dict["schema"] = response_format.get("json_schema", None).get(
+                        "schema", None
+                    )
+
             # Format chat messages and merge system messages into index 0
             chat_messages = []
             system_messages = []
             non_system_messages = []
-            
+
             for message in request_dict.get("messages", []):
                 # Handle content that might be a list of dictionaries (multimodal format)
                 content = message.get("content", None)
@@ -816,34 +906,42 @@ class MLXLMHandler:
                     # For LM models, extract only text content and concatenate
                     text_parts = []
                     for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text" and item.get("text"):
+                        if (
+                            isinstance(item, dict)
+                            and item.get("type") == "text"
+                            and item.get("text")
+                        ):
                             text_parts.append(item["text"])
                     content = "\n".join(text_parts) if text_parts else ""
-                
-                message["content"] = content                
+
+                message["content"] = content
                 # Separate system messages from other messages
                 if message.get("role") == "system":
                     system_messages.append(message)
                 else:
                     non_system_messages.append(message)
-            
+
             # If there are system messages, merge them into a single system message at index 0
             if system_messages:
                 # Combine all system message contents
-                combined_system_content = "\n\n".join([msg["content"] for msg in system_messages if msg.get("content")])
-                
+                combined_system_content = "\n\n".join(
+                    [msg["content"] for msg in system_messages if msg.get("content")]
+                )
+
                 # Create merged system message using the first system message as template
                 merged_system_message = system_messages[0].copy()
                 merged_system_message["content"] = combined_system_content
-                
+
                 # Add merged system message at index 0
                 chat_messages.append(merged_system_message)
-            
+
             # Add all non-system messages after the merged system message
             chat_messages.extend(non_system_messages)
             return chat_messages, request_dict
-        
+
         except Exception as e:
             logger.error(f"Failed to prepare text request: {str(e)}")
-            content = create_error_response(f"Failed to process request: {str(e)}", "bad_request", HTTPStatus.BAD_REQUEST)
+            content = create_error_response(
+                f"Failed to process request: {str(e)}", "bad_request", HTTPStatus.BAD_REQUEST
+            )
             raise HTTPException(status_code=400, detail=content)
