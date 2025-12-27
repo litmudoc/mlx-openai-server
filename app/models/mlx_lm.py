@@ -6,18 +6,19 @@ both streaming and non-streaming inference with KVCache support.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 import gc
 import os
-from typing import Any, Generator
+from typing import Any
 
-import mlx.core as mx
 from loguru import logger
-from mlx_lm.generate import generate, stream_generate
+import mlx.core as mx
 from mlx_lm.models.cache import make_prompt_cache
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 from mlx_lm.utils import load
 from outlines.processors import JSONLogitsProcessor
 
+from ..core.service_llm_engine import ServiceLLMEngine
 from ..utils.outlines_transformer_tokenizer import OutlinesTransformerTokenizer
 
 DEFAULT_TEMPERATURE = os.getenv("DEFAULT_TEMPERATURE", 0.7)
@@ -28,17 +29,39 @@ DEFAULT_SEED = os.getenv("DEFAULT_SEED", 0)
 DEFAULT_MAX_TOKENS = os.getenv("DEFAULT_MAX_TOKENS", 8192)
 DEFAULT_BATCH_SIZE = os.getenv("DEFAULT_BATCH_SIZE", 32)
 
+# Special tokens that should be used as stop sequences
+# These tokens indicate role boundaries and should stop generation
+DEFAULT_STOP_TOKENS = [
+    "<|observation|>",
+    "<|user|>",
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|eot_id|>",
+    "<end_of_turn>",
+    "<|eot|>",
+]
+
+
 class MLX_LM:
-    """
-    A wrapper class for MLX Language Model that handles both streaming and non-streaming inference.
-    
+    """Wrapper class for MLX Language Model that handles both streaming and non-streaming inference.
+
     This class provides a unified interface for generating text responses from text prompts,
     supporting both streaming and non-streaming modes.
     """
 
-    def __init__(self, model_path: str, context_length: int = 32768, trust_remote_code: bool = False, chat_template_file: str = None):
+    def __init__(
+        self,
+        model_path: str,
+        context_length: int = 32768,
+        trust_remote_code: bool = False,
+        chat_template_file: str | None = None,
+    ):
         try:
-            self.model, self.tokenizer = load(model_path, lazy=False, tokenizer_config = {"trust_remote_code": trust_remote_code})
+            self.model, self.tokenizer = load(
+                model_path,
+                lazy=False,
+                tokenizer_config={"trust_remote_code": trust_remote_code},
+            )
             self.pad_token_id = self.tokenizer.pad_token_id
             self.bos_token = self.tokenizer.bos_token
             self.model_type = self.model.model_type
@@ -47,45 +70,72 @@ class MLX_LM:
             if chat_template_file:
                 if not os.path.exists(chat_template_file):
                     raise ValueError(f"Chat template file {chat_template_file} does not exist")
-                with open(chat_template_file, "r") as f:
+                with open(chat_template_file) as f:
                     self.tokenizer.chat_template = f.read()
+
+            # Initialize the custom generation engine
+            self.engine = ServiceLLMEngine(self.model, self.tokenizer)
+
+            # Extract default stop tokens from tokenizer vocabulary
+            self.default_stop_tokens = self._extract_default_stop_tokens()
+            if self.default_stop_tokens:
+                logger.info(f"Detected default stop tokens: {self.default_stop_tokens}")
+
         except Exception as e:
-            raise ValueError(f"Error loading model: {str(e)}")
-        
+            raise ValueError(f"Error loading model: {e!s}")
+
+    def _extract_default_stop_tokens(self) -> list[str]:
+        """Extract default stop tokens from the tokenizer vocabulary.
+
+        Returns
+        -------
+        list[str]
+            List of stop tokens that exist in the tokenizer's vocabulary.
+        """
+        stop_tokens = []
+        try:
+            vocab = self.tokenizer._tokenizer.get_vocab()
+            for token in DEFAULT_STOP_TOKENS:
+                if token in vocab:
+                    stop_tokens.append(token)
+        except Exception as e:
+            logger.warning(f"Failed to extract stop tokens from vocabulary: {e}")
+        return stop_tokens
+
     def _apply_pooling_strategy(self, embeddings: mx.array) -> mx.array:
         embeddings = mx.mean(embeddings, axis=1)
         return embeddings
-    
+
     def _apply_l2_normalization(self, embeddings: mx.array) -> mx.array:
         l2_norms = mx.linalg.norm(embeddings, axis=1, keepdims=True)
         embeddings = embeddings / (l2_norms +  1e-8)
         return embeddings
-    
+
     def _batch_process(
         self, prompts: list[str], batch_size: int = DEFAULT_BATCH_SIZE
     ) -> list[list[int]]:
         """Process prompts in batches with optimized tokenization."""
         all_tokenized = []
-        
+
         # Process prompts in batches
         for i in range(0, len(prompts), batch_size):
             batch = prompts[i:i + batch_size]
             tokenized_batch = []
-            
+
             # Tokenize all prompts in batch
             for p in batch:
                 add_special_tokens = self.bos_token is None or not p.startswith(self.bos_token)
                 tokens = self.tokenizer.encode(p, add_special_tokens=add_special_tokens)
                 tokenized_batch.append(tokens)
-            
+
             # Find max length in batch
             max_length = max(len(tokens) for tokens in tokenized_batch)
-            
+
             # Pad tokens in a vectorized way
             for tokens in tokenized_batch:
                 padding = [self.pad_token_id] * (max_length - len(tokens))
                 all_tokenized.append(tokens + padding)
-        
+
         return all_tokenized
 
     def _preprocess_prompt(self, prompt: str) -> list[int]:
@@ -95,10 +145,10 @@ class MLX_LM:
         )
         tokens = self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
         return mx.array(tokens)
-    
+
     def get_model_type(self) -> str:
         return self.model_type
-    
+
     def get_embeddings(
         self,
         prompts: list[str],
@@ -127,10 +177,10 @@ class MLX_LM:
             for i in range(0, len(prompts), batch_size):
                 batch_prompts = prompts[i:i + batch_size]
                 tokenized_batch = self._batch_process(batch_prompts, batch_size)
-                
+
                 # Convert to MLX array for efficient computation
                 tokenized_batch = mx.array(tokenized_batch)
-                
+
                 try:
                     # Compute embeddings for batch
                     batch_embeddings = self.model.model(tokenized_batch)
@@ -148,19 +198,20 @@ class MLX_LM:
                     # Force MLX garbage collection
                     mx.clear_cache()
                     gc.collect()
-        except Exception as e:
+        except Exception:
             # Clean up on error
             mx.clear_cache()
             gc.collect()
             raise
 
         return all_embeddings
-        
+
     def __call__(
         self,
         messages: list[dict[str, str]],
         stream: bool = False,
         prompt_cache: Any | None = None,
+        context: Any | None = None,
         **kwargs,
     ) -> tuple[str | Generator[str, None, None], int, Any]:
         """Generate text response from the model.
@@ -173,6 +224,8 @@ class MLX_LM:
             Whether to stream the response.
         prompt_cache : Any | None
             Optional pre-filled KVCache for reuse. If None, a new cache is created.
+        context : Any | None
+            Optional GenerationContext for cancellation.
         **kwargs
             Additional parameters for generation:
             - temperature: Sampling temperature (default: 0.7)
@@ -191,8 +244,24 @@ class MLX_LM:
         """
         # Set default parameters if not provided
         seed = kwargs.get("seed", DEFAULT_SEED)
-        max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_TOKENS)
+        max_tokens = kwargs.get("max_tokens")
+        if max_tokens is None:
+            max_tokens = DEFAULT_MAX_TOKENS
+        else:
+            max_tokens = int(max_tokens)
+
         chat_template_kwargs = kwargs.get("chat_template_kwargs", {})
+
+        # Merge user-provided stop sequences with model's default stop tokens
+        user_stop_sequences = kwargs.get("stop") or []
+        if isinstance(user_stop_sequences, str):
+            user_stop_sequences = [user_stop_sequences]
+
+        # Combine default stop tokens with user-provided ones (avoid duplicates)
+        stop_sequences = list(self.default_stop_tokens)
+        for seq in user_stop_sequences:
+            if seq not in stop_sequences:
+                stop_sequences.append(seq)
 
         sampler_kwargs = {
             "temp": kwargs.get("temperature", DEFAULT_TEMPERATURE),
@@ -207,7 +276,7 @@ class MLX_LM:
             repetition_penalty=repetition_penalty,
             repetition_context_size=repetition_context_size,
         )
-        json_schema = kwargs.get("schema", None)
+        json_schema = kwargs.get("schema")
         if json_schema:
             logits_processors.append(
                 JSONLogitsProcessor(
@@ -230,18 +299,22 @@ class MLX_LM:
         )
 
         sampler = make_sampler(**sampler_kwargs)
-        prompt_tokens = len(input_tokens)
+        prompt_tokens_len = len(input_tokens)
 
         # Skip already-processed tokens based on cache offset
         # This enables efficient prefix reuse - only process new tokens
         cache_offset = prompt_cache[0].offset if prompt_cache else 0
+
+        # Convert to MLX array
+        input_tokens_mx = mx.array(input_tokens)
+
         if cache_offset > 0:
             if cache_offset < len(input_tokens):
                 # Cache has partial prefix - only process remaining tokens
                 logger.info(
                     f"Cache reuse: skipping {cache_offset}/{len(input_tokens)} tokens"
                 )
-                input_tokens = input_tokens[cache_offset:]
+                input_tokens_mx = input_tokens_mx[cache_offset:]
             else:
                 # cache_offset >= len(input_tokens)
                 # Cache has all prompt tokens - just need last one to trigger generation
@@ -249,29 +322,25 @@ class MLX_LM:
                     f"Cache full hit: {cache_offset} >= {len(input_tokens)} tokens, "
                     "using last token only"
                 )
-                # Keep last token - mlx_lm needs at least 1 token
-                input_tokens = input_tokens[-1:]
+                # Keep last token - needs at least 1 token
+                input_tokens_mx = input_tokens_mx[-1:]
+
+        # Use ServiceLLMEngine for generation
+        response_gen = self.engine.generate_stream(
+            prompt_tokens=input_tokens_mx,
+            prompt_cache=prompt_cache,
+            context=context,
+            max_tokens=max_tokens,
+            sampler=sampler,
+            stop_sequences=stop_sequences,
+            logits_processors=logits_processors
+        )
 
         if not stream:
-            response = generate(
-                self.model,
-                self.tokenizer,
-                input_tokens,
-                sampler=sampler,
-                max_tokens=max_tokens,
-                prompt_cache=prompt_cache,
-                logits_processors=logits_processors,
-            )
-            return response, prompt_tokens, prompt_cache
-        else:
-            # Streaming mode: return generator of chunks
-            response_gen = stream_generate(
-                self.model,
-                self.tokenizer,
-                input_tokens,
-                sampler=sampler,
-                max_tokens=max_tokens,
-                prompt_cache=prompt_cache,
-                logits_processors=logits_processors,
-            )
-            return response_gen, prompt_tokens, prompt_cache
+            # Non-streaming: consume generator
+            response_text = ""
+            for chunk in response_gen:
+                response_text += chunk
+            return response_text, prompt_tokens_len, prompt_cache
+        # Streaming mode: return generator of chunks
+        return response_gen, prompt_tokens_len, prompt_cache

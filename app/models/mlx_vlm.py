@@ -19,7 +19,7 @@ class MLX_VLM:
     supporting both streaming and non-streaming modes.
     """
     
-    def __init__(self, model_path: str, context_length: int = 32768, trust_remote_code: bool = False, chat_template_file: str = None):
+    def __init__(self, model_path: str, context_length: int = 32768, trust_remote_code: bool = False, chat_template_file: str | None = None):
         """
         Initialize the MLX_VLM model.
         
@@ -48,14 +48,14 @@ class MLX_VLM:
         )
 
     def get_model_type(self):
-        return self.config.model_type
+        return getattr(self.config, "model_type", None)
 
     def __call__(
         self, 
         messages: List[Dict[str, str]], 
-        images: List[str] = None,
-        audios: List[str] = None,
-        videos: List[str] = None,
+        images: List[str] | None = None,
+        audios: List[str] | None = None,
+        videos: List[str] | None = None,
         stream: bool = False, 
         **kwargs
     ) -> Union[str, Generator[str, None, None]]:

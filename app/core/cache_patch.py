@@ -14,14 +14,14 @@ from mlx_lm.models.cache import KVCache, RotatingKVCache
 _PATCHED = False
 
 
-def _new_update_and_fetch(self: RotatingKVCache, k: mx.array, v: mx.array) -> tuple[mx.array, mx.array]:
+def _new_update_and_fetch(self: RotatingKVCache, keys: mx.array, values: mx.array) -> tuple[mx.array, mx.array]:
     """Update cache and fetch state with proper offset tracking.
 
     Parameters
     ----------
-    k : mx.array
+    keys : mx.array
         Key tensor to add to cache.
-    v : mx.array
+    values : mx.array
         Value tensor to add to cache.
 
     Returns
@@ -29,9 +29,26 @@ def _new_update_and_fetch(self: RotatingKVCache, k: mx.array, v: mx.array) -> tu
     tuple[mx.array, mx.array]
         The current cache state (keys, values).
     """
-    KVCache.update_and_fetch(self, k, v)
-    self._idx = self.keys.shape[2]
+    KVCache.update_and_fetch(self, keys, values)
+    self._idx = self.offset
     return self.state
+
+
+def _new_rotating_trim(self: RotatingKVCache, n: int) -> int:
+    """Trim the cache and update internal index.
+
+    This ensures that self._idx stays in sync with self.offset,
+    preventing positional embedding mismatches.
+    """
+    n = min(self.offset, n)
+    self.offset -= n
+    self._idx = self.offset
+    return n
+
+
+def _new_rotating_is_trimmable(self: RotatingKVCache) -> bool:
+    """Check if the cache is trimmable."""
+    return self.offset > self.keep
 
 
 def _new_state_getter(self: RotatingKVCache) -> tuple[mx.array, mx.array]:
@@ -42,6 +59,9 @@ def _new_state_getter(self: RotatingKVCache) -> tuple[mx.array, mx.array]:
     tuple[mx.array, mx.array]
         The current cache state (keys, values).
     """
+    if self.keys is None or self.values is None:
+        raise ValueError("Cache keys or values are not initialized")
+    
     if self.offset <= self.max_size:
         return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
     elif self.keep:
@@ -86,7 +106,7 @@ def apply_cache_patch() -> None:
     # Apply patches
     RotatingKVCache.update_and_fetch = _new_update_and_fetch
     RotatingKVCache.state = property(_new_state_getter, _original_state_setter)
-    RotatingKVCache.trim = KVCache.trim
-    RotatingKVCache.is_trimmable = KVCache.is_trimmable
+    RotatingKVCache.trim = _new_rotating_trim
+    RotatingKVCache.is_trimmable = _new_rotating_is_trimmable
 
     _PATCHED = True

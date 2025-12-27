@@ -11,7 +11,7 @@ import gc
 import time
 import uuid
 from http import HTTPStatus
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from loguru import logger
@@ -19,6 +19,7 @@ from mlx_lm.models.cache import make_prompt_cache
 
 from ..core.kv_cache_manager import KVCacheManager
 from ..core.queue import RequestQueue
+from ..core.service_llm_engine import GenerationContext
 from ..models.mlx_lm import MLX_LM
 from ..schemas.openai import ChatCompletionRequest, EmbeddingRequest, UsageInfo
 from ..utils.errors import create_error_response
@@ -152,10 +153,16 @@ class MLXLMHandler:
             return len(input_tokens)
         except Exception as e:
             if "tool_choice" in kwargs and isinstance(kwargs["tool_choice"], str):
-                logger.warning(f"Tool choice is string: {kwargs['tool_choice']}")
+                logger.debug(f"Tool choice is string: {kwargs['tool_choice']}")
             logger.warning(f"Failed to count message tokens: {str(e)}")
             # Fallback: rough estimate
-            total_text = " ".join([msg.get("content", "") for msg in messages if isinstance(msg.get("content"), str)])
+            total_text = " ".join(
+                [
+                    msg.get("content", "")
+                    for msg in messages
+                    if isinstance(msg, dict) and isinstance(msg.get("content"), str)
+                ]
+            )
             return self._count_tokens(total_text)
 
     def _extract_model_metadata(self) -> Dict[str, Any]:
@@ -226,6 +233,149 @@ class MLXLMHandler:
         await self.request_queue.start(self._process_request)
         logger.info("Initialized MLXHandler and started request queue")
 
+    def _run_model_sync(
+        self, 
+        loop: asyncio.AbstractEventLoop, 
+        request_data: dict[str, Any],
+        stream_queue: Optional[asyncio.Queue] = None
+    ) -> Any: 
+        """Run model generation in a separate thread."""
+        try:
+             # Check if the request is for embeddings
+            if request_data.get("type") == "embeddings":
+                result = self.model.get_embeddings(request_data["input"])
+                gc.collect()
+                return result
+
+            # Extract request parameters
+            messages = request_data.get("messages", [])
+            stream = request_data.get("stream", False)
+            context = request_data.get("context", None)
+
+            # Remove these keys from model_params
+            model_params = request_data.copy()
+            model_params.pop("messages", None)
+            model_params.pop("stream", None)
+            model_params.pop("context", None)
+            model_params.pop("stream_queue", None)
+            # Remove internal keys
+            model_params.pop("_cached_kv", None)
+            model_params.pop("_input_tokens", None)
+            model_params.pop("_entry_id", None)
+            
+            # Helper to put items in queue safely
+            def put_in_queue(item):
+                if stream_queue:
+                    loop.call_soon_threadsafe(stream_queue.put_nowait, item)
+
+            # Apply message conversion if needed
+            if self.converter:
+                refined_messages = self.converter.convert_messages(messages)
+            else:
+                refined_messages = [
+                    {k: v for k, v in msg.items() if v is not None}
+                    for msg in messages
+                ]
+            
+            # Use cached_kv passed from _process_request
+            cached_kv = request_data.get("_cached_kv")
+            input_tokens = request_data.get("_input_tokens") # This might be None if cache lookup failed or wasn't done?
+            entry_id = request_data.get("_entry_id")
+
+            # Fallback if input_tokens not provided (shouldn't happen with updated logic)
+            if input_tokens is None:
+                 # Re-tokenize
+                chat_template_kwargs = model_params.get("chat_template_kwargs", {})
+                input_tokens = self.model.tokenizer.apply_chat_template(
+                    refined_messages,
+                    add_generation_prompt=True,
+                    **chat_template_kwargs,
+                )
+            
+            # Call the model with cache
+            response, prompt_tokens, cache = self.model(
+                messages=refined_messages,
+                stream=stream,
+                prompt_cache=cached_kv,
+                context=context,
+                **model_params,
+            )
+
+            if stream and stream_queue:
+                # Iterate generator
+                generated_tokens = []
+                
+                try:
+                    for chunk in response:
+                        if chunk: # Check chunk validity
+                            text = chunk if isinstance(chunk, str) else chunk.text
+                            if text:
+                                chunk_tokens = self.model.tokenizer.encode(
+                                    text, add_special_tokens=False
+                                )
+                                generated_tokens.extend(chunk_tokens)
+                            put_in_queue(chunk)
+                    
+                    # Done streaming
+                    # We need to save cache. 
+                    # `cache_manager.save_cache` is async.
+                    # Schedule it on the main loop.
+                    async def save_cache_async():
+                        try:
+                            full_token_ids = input_tokens + generated_tokens
+                            # We need access to self.cache_manager which is async
+                            await self.cache_manager.save_cache(
+                                cache=cache,
+                                token_ids=full_token_ids,
+                                entry_id=entry_id,
+                            )
+                            logger.info(f"Cache saved (streaming): {len(full_token_ids)} tokens")
+                        except Exception as e:
+                            logger.warning(f"Failed to save cache: {e}")
+                            await self.cache_manager.unlock_entry(entry_id)
+
+                    future = asyncio.run_coroutine_threadsafe(save_cache_async(), loop)
+                    
+                    # Signal done
+                    put_in_queue(None)
+
+                except Exception as e:
+                    put_in_queue(e)
+                    # Also unlock cache if failed
+                    if entry_id is not None:
+                        asyncio.run_coroutine_threadsafe(self.cache_manager.unlock_entry(entry_id), loop)
+
+            else:
+                # Non-streaming
+                # Tokenize response
+                response_text = response if isinstance(response, str) else response.get("content", "")
+                generated_tokens = self.model.tokenizer.encode(
+                    response_text, add_special_tokens=False
+                )
+                full_token_ids = input_tokens + generated_tokens
+                
+                # Save cache async
+                async def save_cache_sync_async():
+                    try:
+                        await self.cache_manager.save_cache(
+                            cache=cache,
+                            token_ids=full_token_ids,
+                            entry_id=entry_id,
+                        )
+                    except Exception as e:
+                        if entry_id is not None:
+                            await self.cache_manager.unlock_entry(entry_id)
+                
+                asyncio.run_coroutine_threadsafe(save_cache_sync_async(), loop)
+                
+                gc.collect()
+                return response, prompt_tokens
+
+        except Exception as e:
+            if stream_queue:
+                put_in_queue(e)
+            raise e
+
     async def generate_text_stream(self, request: ChatCompletionRequest) -> AsyncGenerator[str, None]:
         """
         Generate a streaming response for text-only chat completion requests.
@@ -238,6 +388,8 @@ class MLXLMHandler:
             str or dict: Response chunks (str) followed by usage info (dict) at the end.
         """
         request_id = f"text-{uuid.uuid4()}"
+        context = GenerationContext()
+        stream_queue = asyncio.Queue()
 
         try:
             chat_messages, model_params = await self._prepare_text_request(request)
@@ -249,52 +401,55 @@ class MLXLMHandler:
             request_data = {
                 "messages": chat_messages,
                 "stream": True,
+                "context": context,
+                "stream_queue": stream_queue,
                 **model_params
             }
-            result = await self.request_queue.submit(request_id, request_data)
             
-            # Unpack result - streaming returns (generator, prompt_tokens, cache_save_callback)
-            if len(result) == 3:
-                response_generator, prompt_tokens, cache_save_callback = result
-            else:
-                response_generator, prompt_tokens = result
-                cache_save_callback = None
+            # Enqueue request - this adds to queue but doesn't block for result
+            await self.request_queue.enqueue(request_id, request_data)
             
             # Create appropriate parsers for this model type
-
             thinking_parser, tool_parser = self._create_parsers()
 
+            if ParserFactory.respects_enable_thinking(self.reasoning_parser):
+                enable_thinking = chat_template_kwargs.get("enable_thinking", True)
+                if not enable_thinking:
+                    thinking_parser = None
+
             is_first_chunk = True
-            completion_chunks = []  # Accumulate completion for token counting
+            completion_chunks = []
             after_thinking_close_content = None
 
-            if thinking_parser and ParserFactory.has_special_parsing(self.reasoning_parser):
-                for chunk in response_generator:
-                    if not chunk or not chunk.text:
-                        continue
-                    text = chunk.text
-                    completion_chunks.append(text)
+            # Consume queue
+            while True:
+                item = await stream_queue.get()
+                
+                if item is None:
+                    break
+                
+                if isinstance(item, Exception):
+                    raise item
+                
+                # MLX_LM yields object with .text usually, or str?
+                # engine yields str. MLX_LM yields engine generator (str).
+                chunk_text = item
+                if not isinstance(item, str) and hasattr(item, 'text'):
+                     chunk_text = item.text
+                
+                if not chunk_text:
+                    continue
+
+                completion_chunks.append(chunk_text)
+                text = chunk_text
+
+                if thinking_parser and ParserFactory.has_special_parsing(self.reasoning_parser):
                     parsed_content, is_complete = thinking_parser.parse_stream(text)
                     if parsed_content:
                         yield parsed_content
                     if is_complete:
-                        break
-            else:
-
-                if ParserFactory.respects_enable_thinking(self.reasoning_parser):
-                    enable_thinking = chat_template_kwargs.get("enable_thinking", True)
-                    if not enable_thinking:
-                        thinking_parser = None
-
-                # # Process streaming response
-                for chunk in response_generator:
-
-                    if not chunk or not chunk.text:
-                        continue
-
-                    text = chunk.text
-                    completion_chunks.append(text)
-
+                         pass
+                else:
                     if is_first_chunk:
                         if thinking_parser and ParserFactory.needs_redacted_reasoning_prefix(self.reasoning_parser):
                             text = thinking_parser.get_thinking_open() + text
@@ -322,11 +477,7 @@ class MLXLMHandler:
 
                     yield text
 
-            # Save cache after streaming completes
-            if cache_save_callback:
-                await cache_save_callback()
-
-            # Count completion tokens and yield usage info at the end
+            # Usage info
             completion_text = "".join(completion_chunks)
             completion_tokens = self._count_tokens(completion_text)
             total_tokens = prompt_tokens + completion_tokens
@@ -339,14 +490,22 @@ class MLXLMHandler:
                 )
             }
 
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(f"Request {request_id} cancelled.")
+            context.cancel()
+            raise
         except asyncio.QueueFull:
+            context.cancel()
             logger.error("Too many requests. Service is at capacity.")
             content = create_error_response("Too many requests. Service is at capacity.", "rate_limit_exceeded", HTTPStatus.TOO_MANY_REQUESTS)
             raise HTTPException(status_code=429, detail=content)
         except Exception as e:
+            context.cancel()
             logger.error(f"Error in text stream generation for request {request_id}: {str(e)}")
             content = create_error_response(f"Failed to generate text stream: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
             raise HTTPException(status_code=500, detail=content)
+        finally:
+            context.cancel()
 
     async def generate_text_response(self, request: ChatCompletionRequest) -> Dict[str, Any]:
         """
@@ -360,6 +519,7 @@ class MLXLMHandler:
             dict: Response content and usage info.
         """
         request_id = f"text-{uuid.uuid4()}"
+        context = GenerationContext()
 
         try:
             chat_messages, model_params = await self._prepare_text_request(request)
@@ -371,6 +531,7 @@ class MLXLMHandler:
             request_data = {
                 "messages": chat_messages,
                 "stream": False,
+                "context": context,
                 **model_params
             }
             response, prompt_tokens = await self.request_queue.submit(request_id, request_data)
@@ -426,12 +587,18 @@ class MLXLMHandler:
             parsed_response["content"] = response_text
 
             return {"response": parsed_response, "usage": usage}
-                        
+        
+        except asyncio.CancelledError:
+            logger.info(f"Request {request_id} cancelled.")
+            context.cancel()
+            raise
         except asyncio.QueueFull:
+            context.cancel()
             logger.error("Too many requests. Service is at capacity.")
             content = create_error_response("Too many requests. Service is at capacity.", "rate_limit_exceeded", HTTPStatus.TOO_MANY_REQUESTS)
             raise HTTPException(status_code=429, detail=content)
         except Exception as e:
+            context.cancel()
             logger.error(f"Error in text response generation: {str(e)}")
             content = create_error_response(f"Failed to generate text response: {str(e)}", "server_error", HTTPStatus.INTERNAL_SERVER_ERROR)
             raise HTTPException(status_code=500, detail=content)
@@ -468,7 +635,8 @@ class MLXLMHandler:
             raise HTTPException(status_code=500, detail=content)
 
     async def _process_request(
-        self, request_data: dict[str, Any]
+        self,
+        request_data: dict[str, Any]
     ) -> tuple[Any, int] | list[float]:
         """Process a text request with KVCache reuse support.
 
@@ -490,18 +658,12 @@ class MLXLMHandler:
         try:
             # Check if the request is for embeddings
             if request_data.get("type") == "embeddings":
-                result = self.model.get_embeddings(request_data["input"])
-                gc.collect()
-                return result
+                loop = asyncio.get_running_loop()
+                return await asyncio.to_thread(self._run_model_sync, loop, request_data)
 
             # Extract request parameters
             messages = request_data.get("messages", [])
-            stream = request_data.get("stream", False)
-
-            # Remove these keys from model_params
-            model_params = request_data.copy()
-            model_params.pop("messages", None)
-            model_params.pop("stream", None)
+            stream_queue = request_data.get("stream_queue", None)
 
             # Apply message conversion if needed
             if self.converter:
@@ -512,7 +674,9 @@ class MLXLMHandler:
                     for msg in messages
                 ]
 
-            # Tokenize for cache lookup
+            # Re-tokenize for cache lookup
+            # We must do this because we need input_tokens for cache lookup
+            model_params = request_data.copy()
             chat_template_kwargs = model_params.get("chat_template_kwargs", {})
             input_tokens = self.model.tokenizer.apply_chat_template(
                 refined_messages,
@@ -558,78 +722,16 @@ class MLXLMHandler:
                 logger.info("Cache miss: creating fresh cache")
                 cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
 
-            # Call the model with cache
-            response, prompt_tokens, cache = self.model(
-                messages=refined_messages,
-                stream=stream,
-                prompt_cache=cached_kv,
-                **model_params,
-            )
-
-            if stream:
-                # Wrap generator to save cache after streaming completes
-                # Note: This must be a sync generator since stream_generate returns sync
-                generated_tokens: list[int] = []
-                cache_entry_id = entry_id  # Capture for closure
-
-                def cache_saving_generator():
-                    """Wrapper that saves cache after streaming completes."""
-                    nonlocal generated_tokens
-
-                    try:
-                        for chunk in response:
-                            if chunk and chunk.text:
-                                # Tokenize generated text incrementally
-                                chunk_tokens = self.model.tokenizer.encode(
-                                    chunk.text, add_special_tokens=False
-                                )
-                                generated_tokens.extend(chunk_tokens)
-                            yield chunk
-                    finally:
-                        # Schedule async cache save (will be awaited by caller)
-                        pass  # Cache save is handled by the caller
-
-                # Return generator and a callback to save cache
-                def get_cache_save_callback():
-                    """Return callback to save cache after streaming."""
-
-                    async def save():
-                        try:
-                            # Only save prompt tokens (not generated) for prefix matching
-                            await self.cache_manager.save_cache(
-                                cache=cache,
-                                token_ids=input_tokens,
-                                entry_id=cache_entry_id,
-                            )
-                            logger.info(
-                                f"Cache saved (streaming): {len(input_tokens)} prompt tokens"
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to save cache: {e}")
-                            await self.cache_manager.unlock_entry(cache_entry_id)
-
-                    return save
-
-                gc.collect()
-                # Return tuple: (generator, prompt_tokens, cache_save_callback)
-                return cache_saving_generator(), prompt_tokens, get_cache_save_callback()
-
-            else:
-                # Non-streaming: save cache immediately
-                # Only save prompt tokens (not generated) for prefix matching
-                try:
-                    await self.cache_manager.save_cache(
-                        cache=cache,
-                        token_ids=input_tokens,
-                        entry_id=entry_id,
-                    )
-                    logger.info(f"Cache saved (non-streaming): {len(input_tokens)} prompt tokens")
-                except Exception as e:
-                    logger.warning(f"Failed to save cache: {e}")
-                    await self.cache_manager.unlock_entry(entry_id)
-
-                gc.collect()
-                return response, prompt_tokens
+            # Pass prepared data to thread
+            request_data["_cached_kv"] = cached_kv
+            request_data["_input_tokens"] = input_tokens
+            request_data["_entry_id"] = entry_id
+            
+            # Offload to thread
+            loop = asyncio.get_running_loop()
+            result = await asyncio.to_thread(self._run_model_sync, loop, request_data, stream_queue)
+            
+            return result
 
         except Exception as e:
             logger.error(f"Error processing text request: {str(e)}")

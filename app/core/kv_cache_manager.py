@@ -74,14 +74,12 @@ class KVCacheManager:
             f"min_prefix_length={min_prefix_length}"
         )
 
-    async def find_best_match(
-        self, token_ids: list[int]
-    ) -> tuple[Any | None, int, int | None]:
+    async def find_best_match(self, token_ids: list[int]) -> tuple[Any | None, int, int | None]:
         """Find cache with longest matching prefix (non-locked entries only).
 
-        The cache is only reusable if the cached token sequence is a **prefix**
-        of the new token sequence. This ensures that cache.offset matches the
-        prefix length exactly.
+        The cache is reusable if it shares a common prefix with the new token
+        sequence. If the cached sequence is longer than the matching prefix,
+        it will be trimmed before use.
 
         Parameters
         ----------
@@ -105,45 +103,29 @@ class KVCacheManager:
                     continue
 
                 cached_tokens = entry.token_ids
-                
+
                 # Log for debugging
                 logger.info(
                     f"Comparing: cached={len(cached_tokens)} tokens, "
                     f"new={len(token_ids)} tokens, entry_id={entry.entry_id}"
                 )
-                logger.info(f"  Cached first 10: {cached_tokens[:10]}")
-                logger.info(f"  New first 10:    {token_ids[:10]}")
-                
-                # Cache is only valid if cached sequence is a prefix of new sequence
-                # This ensures cache.offset == len(cached_tokens) == prefix_len
-                if len(cached_tokens) > len(token_ids):
-                    logger.info(f"  -> Skip: cached longer than new")
-                    continue
-                    
-                # Check if cached sequence is a prefix of new sequence
-                is_prefix = all(
-                    cached_tokens[i] == token_ids[i]
-                    for i in range(len(cached_tokens))
-                )
-                
-                if not is_prefix:
-                    # Find where mismatch occurs
-                    for i in range(min(len(cached_tokens), len(token_ids))):
-                        if cached_tokens[i] != token_ids[i]:
-                            logger.info(
-                                f"  -> Mismatch at position {i}: "
-                                f"cached={cached_tokens[i]}, new={token_ids[i]}"
-                            )
-                            break
-                    continue
-                    
-                prefix_len = len(cached_tokens)
+
+                # Find longest common prefix
+                prefix_len = self._compute_prefix_length(cached_tokens, token_ids)
+
+                if prefix_len > 0:
+                    if prefix_len < len(cached_tokens):
+                        logger.info(f"  -> Partial match: {prefix_len} tokens (needs trim)")
+                    else:
+                        logger.info(f"  -> Full prefix match: {prefix_len} tokens")
+                elif len(cached_tokens) > 0 and len(token_ids) > 0:
+                    logger.info(
+                        f"  -> Mismatch at position 0: "
+                        f"cached={cached_tokens[0]}, new={token_ids[0]}"
+                    )
 
                 # Update best match if this prefix is longer and meets minimum
-                if (
-                    prefix_len >= self.min_prefix_length
-                    and prefix_len > best_prefix_len
-                ):
+                if prefix_len >= self.min_prefix_length and prefix_len > best_prefix_len:
                     best_entry = entry
                     best_prefix_len = prefix_len
                     best_entry_id = entry.entry_id
@@ -179,7 +161,7 @@ class KVCacheManager:
             Length of the common prefix.
         """
         prefix_len = 0
-        for t1, t2 in zip(seq1, seq2):
+        for t1, t2 in zip(seq1, seq2, strict=False):
             if t1 != t2:
                 break
             prefix_len += 1
@@ -208,7 +190,7 @@ class KVCacheManager:
                 f"save_cache called: entry_id={entry_id}, tokens={len(token_ids)}, "
                 f"current_entries={len(self.entries)}, max={self.max_cache_count}"
             )
-            
+
             # Update existing entry if provided
             if entry_id is not None and entry_id in self.entries:
                 entry = self.entries[entry_id]
@@ -216,9 +198,7 @@ class KVCacheManager:
                 entry.token_ids = token_ids.copy()
                 entry.last_used = datetime.now()
                 entry.is_locked = False  # Unlock after save
-                logger.info(
-                    f"Cache updated: entry_id={entry_id}, tokens={len(token_ids)}"
-                )
+                logger.info(f"Cache updated: entry_id={entry_id}, tokens={len(token_ids)}")
                 return
 
             # Add new entry if pool not full
@@ -232,14 +212,10 @@ class KVCacheManager:
                     entry_id=new_entry_id,
                     is_locked=False,
                 )
-                logger.info(
-                    f"Cache created: entry_id={new_entry_id}, tokens={len(token_ids)}"
-                )
+                logger.info(f"Cache created: entry_id={new_entry_id}, tokens={len(token_ids)}")
             else:
                 # Evict LRU unlocked entry
-                unlocked_entries = [
-                    e for e in self.entries.values() if not e.is_locked
-                ]
+                unlocked_entries = [e for e in self.entries.values() if not e.is_locked]
                 if unlocked_entries:
                     lru_entry = min(unlocked_entries, key=lambda e: e.last_used)
                     lru_entry.cache = cache
@@ -293,12 +269,8 @@ class KVCacheManager:
             return {
                 "total_entries": len(self.entries),
                 "max_capacity": self.max_cache_count,
-                "locked_entries": sum(
-                    1 for e in self.entries.values() if e.is_locked
-                ),
-                "available_entries": sum(
-                    1 for e in self.entries.values() if not e.is_locked
-                ),
+                "locked_entries": sum(1 for e in self.entries.values() if e.is_locked),
+                "available_entries": sum(1 for e in self.entries.values() if not e.is_locked),
                 "hits": self._hits,
                 "misses": self._misses,
                 "hit_rate": self._hits / total if total > 0 else 0.0,

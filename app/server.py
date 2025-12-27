@@ -128,7 +128,7 @@ def create_lifespan(config_args: MLXServerConfig):
     """
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> None:
+    async def lifespan(app: FastAPI):
         """FastAPI lifespan callable that initializes MLX handlers.
 
         On startup this function selects and initializes the correct

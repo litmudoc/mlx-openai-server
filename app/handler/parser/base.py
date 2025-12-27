@@ -11,6 +11,7 @@ class BaseThinkingParser:
         self.thinking_open = thinking_open
         self.thinking_close = thinking_close
         self.is_thinking = False
+        self.buffer = ""
 
     def get_thinking_open(self):
         return self.thinking_open
@@ -35,7 +36,14 @@ class BaseThinkingParser:
         remaining_content = content[end_thinking + thinking_close_len:].strip()
         return thinking_content, remaining_content
         
-    
+    def _find_partial_match(self, text: str, tag: str) -> int:
+        """Return the length of the longest suffix of 'text' that is a prefix of 'tag'."""
+        max_check_len = min(len(text), len(tag))
+        for length in range(max_check_len, 0, -1):
+            if tag.startswith(text[-length:]):
+                return length
+        return 0
+
     def parse_stream(self, chunk: Optional[str] = None) -> Tuple[Optional[Any], bool]:
         """
         Parse streaming chunks for thinking content.
@@ -45,57 +53,103 @@ class BaseThinkingParser:
                 - parsed_content: The parsed chunk (could be str, dict, or None)
                 - is_complete: True if thinking section is complete
         """
-        if chunk is None:
-            return None, False
+        if chunk:
+            self.buffer += chunk
             
-        if not self.is_thinking:
-            # Check if thinking_open is in the chunk
-            if self.thinking_open in chunk:
-                self.is_thinking = True
-                start_idx = chunk.find(self.thinking_open)
-                after_open = chunk[start_idx + len(self.thinking_open):]
-                before_open = chunk[:start_idx]
-                
-                # Check if thinking_close is also in this chunk (both tags in same chunk)
-                if self.thinking_close in after_open:
-                    close_idx = after_open.find(self.thinking_close)
+        result = None
+        is_complete = False
+        
+        while self.buffer:
+            if not self.is_thinking:
+                # Look for opening tag
+                start_idx = self.buffer.find(self.thinking_open)
+                if start_idx != -1:
+                    # Found opening tag
+                    # Yield content before tag (if any)
+                    if start_idx > 0:
+                        pre_content = self.buffer[:start_idx]
+                        # We need to return this. But we can only return one thing.
+                        # If we have pre-content, return it now, and keep the rest for next call?
+                        # Or return tuple? The contract expects one item.
+                        # We will prioritize returning pre-content.
+                        # Remove pre-content from buffer
+                        self.buffer = self.buffer[start_idx:]
+                        return pre_content, False
+                    
+                    # Buffer starts with thinking_open. Switch state.
+                    self.is_thinking = True
+                    self.buffer = self.buffer[len(self.thinking_open):]
+                    continue
+                else:
+                    # No opening tag found. Check for partial match at end.
+                    partial_len = self._find_partial_match(self.buffer, self.thinking_open)
+                    if partial_len > 0:
+                        # Yield safe part
+                        safe_len = len(self.buffer) - partial_len
+                        if safe_len > 0:
+                            content = self.buffer[:safe_len]
+                            self.buffer = self.buffer[safe_len:]
+                            return content, False
+                        else:
+                            # Entire buffer is a partial match, wait for more data
+                            return None, False
+                    else:
+                        # No partial match, yield everything
+                        content = self.buffer
+                        self.buffer = ""
+                        return content, False
+            else:
+                # Inside thinking block
+                # Look for closing tag
+                end_idx = self.buffer.find(self.thinking_close)
+                if end_idx != -1:
+                    # Found closing tag
+                    reasoning_content = self.buffer[:end_idx]
+                    self.buffer = self.buffer[end_idx + len(self.thinking_close):]
                     self.is_thinking = False
-                    # Return content before open tag + content after close tag
-                    after_close = after_open[close_idx + len(self.thinking_close):]
-                    return (before_open + after_close) if (before_open + after_close) else None, True
-                
-                # Only opening tag found, return content before it (if any) and reasoning content after
-                # If there's content after the opening tag, return it as reasoning_content
-                if after_open:
-                    return {
-                        "reasoning_content": after_open
-                    }, False
-                # Just the opening tag with nothing after it
-                return before_open if before_open else None, False
-            # No thinking tag, return chunk as is
-            return chunk, False
-        
-        # Currently in thinking mode
-        if self.thinking_close in chunk:
-            close_idx = chunk.find(self.thinking_close)
-            reasoning_part = chunk[:close_idx]
-            after_close = chunk[close_idx + len(self.thinking_close):]
-            self.is_thinking = False
-            
-            # If there's reasoning content before the close tag, return it with completion signal
-            if reasoning_part:
-                result = {"reasoning_content": reasoning_part}
-                # If there's also content after the close tag, include it as text
-                if after_close:
-                    result["content"] = after_close
-                return result, True
-            # Close tag found, thinking complete, return content after close tag (if any)
-            return after_close if after_close else None, True
-        
-        # Still in thinking mode, return as reasoning content
-        return {
-            "reasoning_content": chunk
-        }, False
+                    
+                    # Yield reasoning content and signal completion
+                    # If buffer has more content (after close), we leave it in buffer.
+                    # Caller handles is_complete=True by disabling parser, so leftover buffer 
+                    # should be returned? 
+                    # If is_complete=True, the handler sets thinking_parser=None. 
+                    # The handler needs to handle the rest of the text.
+                    # But parse_stream is called one last time?
+                    # The handler loop:
+                    # parsed, complete = parser.parse_stream(text)
+                    # if parsed: yield
+                    # if complete: parser = None
+                    # if after_thinking_close_content: text = that
+                    
+                    # We can use the dictionary return to pass extra content if needed, 
+                    # but current BaseThinkingParser logic in handler supports:
+                    # if parsed is dict: after_thinking_close_content = parsed.pop("content")
+                    
+                    res = {"reasoning_content": reasoning_content}
+                    if self.buffer:
+                        res["content"] = self.buffer
+                        self.buffer = ""
+                    
+                    return res, True
+                else:
+                    # No closing tag. Check partial match.
+                    partial_len = self._find_partial_match(self.buffer, self.thinking_close)
+                    if partial_len > 0:
+                        # Yield safe reasoning
+                        safe_len = len(self.buffer) - partial_len
+                        if safe_len > 0:
+                            reasoning = self.buffer[:safe_len]
+                            self.buffer = self.buffer[safe_len:]
+                            return {"reasoning_content": reasoning}, False
+                        else:
+                            return None, False
+                    else:
+                        # Yield all as reasoning
+                        reasoning = self.buffer
+                        self.buffer = ""
+                        return {"reasoning_content": reasoning}, False
+                        
+        return None, is_complete
 
 class ParseToolState:
     NORMAL = 0
@@ -185,6 +239,14 @@ class BaseToolParser:
         remaining_content = " ".join(filter(None, remaining_parts))
         return tool_calls, remaining_content
     
+    def _find_partial_match(self, text: str, tag: str) -> int:
+        """Return the length of the longest suffix of 'text' that is a prefix of 'tag'."""
+        max_check_len = min(len(text), len(tag))
+        for length in range(max_check_len, 0, -1):
+            if tag.startswith(text[-length:]):
+                return length
+        return 0
+
     def parse_stream(self, chunk: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], bool]:
         """
         Parse streaming chunks for tool calls.
@@ -193,49 +255,88 @@ class BaseToolParser:
         Returns:
             Tuple[parsed_content, is_complete]: 
                 - parsed_content: The parsed chunk (could be str, dict)
-                - is_complete: True if tool call is complete
+                - is_complete: True if item is ready to yield
         """
-        res = {
-            "name": None,
-            "arguments": None,
-            "content": None,
-        }
-        if chunk is None:
-            return None, True
-
-        start_tool_index = chunk.find(self.tool_open)
-
-        if start_tool_index != -1:
-            # Reset state and buffer when entering FOUND_PREFIX
-            self.state = ParseToolState.FOUND_PREFIX
-            self.buffer = ""
-            self._set_content(res, chunk[:start_tool_index])
-            self.buffer += chunk[start_tool_index + self._tool_open_len:]
-            return res, False
-
-        if self.state == ParseToolState.FOUND_PREFIX:
-            end_tool_index = chunk.find(self.tool_close)
-            if end_tool_index != -1:
-                tool_call_content = self.buffer + chunk[:end_tool_index]
-                try:
-                    json_output = self._parse_tool_content(tool_call_content)
-                except json.JSONDecodeError:
-                    logger.error("Error parsing tool call: %s", tool_call_content)
-                    return res, False
-                res["name"] = str(json_output["name"])
-                res["arguments"] = str(json_output["arguments"])
-                # Calculate remaining content once and reset state
-                remaining = chunk[end_tool_index + self._tool_close_len:]
-                self.buffer = remaining
-                self._set_content(res, remaining)
-                self.state = ParseToolState.NORMAL
-                return res, True
-            else:
-                self.buffer += chunk
-                return res, False
+        if chunk:
+            self.buffer += chunk
             
-        self._set_content(res, chunk)
-        return res, True
+        res = {}
+        
+        while self.buffer:
+            if self.state == ParseToolState.NORMAL:
+                # Look for tool_open
+                start_idx = self.buffer.find(self.tool_open)
+                if start_idx != -1:
+                    # Found start
+                    # Yield content before tool
+                    content = self.buffer[:start_idx]
+                    self.buffer = self.buffer[start_idx + self._tool_open_len:]
+                    self.state = ParseToolState.FOUND_PREFIX
+                    
+                    if content:
+                        self._set_content(res, content)
+                        return res, True
+                    # If no content, continue loop to process tool immediately
+                    continue
+                else:
+                    # Check partial match
+                    partial_len = self._find_partial_match(self.buffer, self.tool_open)
+                    if partial_len > 0:
+                        # Yield safe part
+                        safe_len = len(self.buffer) - partial_len
+                        if safe_len > 0:
+                            content = self.buffer[:safe_len]
+                            self.buffer = self.buffer[safe_len:]
+                            self._set_content(res, content)
+                            return res, True
+                        else:
+                            # Buffer is all partial, wait
+                            return None, True # Using True to signal "no error, just waiting"? 
+                            # Wait, handler usage: `if is_complete: yield parsed`.
+                            # So if we return None, True -> yields None (filtered out).
+                            # Correct.
+                            return None, True
+                    else:
+                        # Yield all
+                        content = self.buffer
+                        self.buffer = ""
+                        self._set_content(res, content)
+                        return res, True
+            
+            elif self.state == ParseToolState.FOUND_PREFIX:
+                # Look for tool_close
+                end_idx = self.buffer.find(self.tool_close)
+                if end_idx != -1:
+                    # Found end
+                    tool_content = self.buffer[:end_idx]
+                    self.buffer = self.buffer[end_idx + self._tool_close_len:]
+                    self.state = ParseToolState.NORMAL
+                    
+                    try:
+                        json_output = self._parse_tool_content(tool_content)
+                        res["name"] = str(json_output["name"])
+                        res["arguments"] = str(json_output["arguments"])
+                        return res, True
+                    except Exception as e:
+                        logger.error(f"Error parsing tool call: {e}")
+                        # If parsing fails, what do we do? Yield raw content?
+                        # Recover by yielding raw content + close tag?
+                        # For now, just log and yield nothing (swallow bad tool call) or yield as text?
+                        # Let's yield as text to be safe
+                        self._set_content(res, self.tool_open + tool_content + self.tool_close)
+                        return res, True
+                else:
+                    # Check partial match
+                    partial_len = self._find_partial_match(self.buffer, self.tool_close)
+                    if partial_len > 0:
+                        # We are buffering tool content. Do NOT yield partials.
+                        # Wait for full close tag.
+                        return None, True
+                    else:
+                        # Still buffering.
+                        return None, True
+                        
+        return None, True
 
 """
 Base Message Converter
