@@ -142,7 +142,7 @@ class ServiceLLMEngine:
             # Forward pass updates cache in-place
             logits = self.model(chunk, cache=prompt_cache)
             mx.eval(logits)
-
+            mx.clear_cache()
         # 2. Prepare for Decode Loop
         curr_token = prompt_tokens[:, -1:]
 
@@ -162,17 +162,29 @@ class ServiceLLMEngine:
                 for processor in logits_processors:
                     logits = processor(curr_token, logits)
 
+                # [MEMORY] Evaluate logits to prevent computation graph accumulation
+                mx.eval(logits)
+
                 # Sampling
                 if sampler:
                     next_token = sampler(logits)
                 else:
                     next_token = mx.argmax(logits, axis=-1)
 
+                # [MEMORY] Evaluate next_token to materialize computation
+                mx.eval(next_token)
+
+                # Extract token value before creating new array
+                token_item = int(next_token.item())
+
                 curr_token = next_token[:, None]
                 mx.eval(curr_token)
 
+                # [MEMORY] Explicitly free intermediate tensors to prevent graph accumulation
+                # This is critical for long generations to avoid ~512MB per 1000 tokens
+                mx.clear_cache()
+
                 # Decode and Check Stop
-                token_item = next_token.item()
 
                 # Use StreamingDetokenizer for proper unicode handling
                 detokenizer.add_token(token_item)
