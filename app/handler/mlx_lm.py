@@ -214,6 +214,9 @@ class MLXLMHandler:
             input_tokens = self.model.tokenizer.apply_chat_template(
                 messages, add_generation_prompt=True, **kwargs
             )
+            # Extract token IDs from BatchEncoding if necessary
+            if hasattr(input_tokens, 'input_ids'):
+                input_tokens = input_tokens.input_ids
             return len(input_tokens)
         except Exception as e:
             if "tool_choice" in kwargs and isinstance(kwargs["tool_choice"], str):
@@ -351,6 +354,9 @@ class MLXLMHandler:
                     add_generation_prompt=True,
                     **chat_template_kwargs,
                 )
+                # Extract token IDs from BatchEncoding if necessary
+                if hasattr(input_tokens, 'input_ids'):
+                    input_tokens = input_tokens.input_ids
 
             # Call the model with cache
             response, prompt_tokens, cache = self.model(
@@ -769,6 +775,9 @@ class MLXLMHandler:
                 add_generation_prompt=True,
                 **chat_template_kwargs,
             )
+            # Extract token IDs from BatchEncoding if necessary
+            if hasattr(input_tokens, 'input_ids'):
+                input_tokens = input_tokens.input_ids
 
             # Find matching cache
             cached_kv, prefix_len, entry_id = await self.cache_manager.find_best_match(input_tokens)

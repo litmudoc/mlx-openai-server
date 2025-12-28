@@ -298,6 +298,10 @@ class MLX_LM:
             **chat_template_kwargs,
         )
 
+        # Extract token IDs from BatchEncoding if necessary
+        if hasattr(input_tokens, 'input_ids'):
+            input_tokens = input_tokens.input_ids
+
         sampler = make_sampler(**sampler_kwargs)
         prompt_tokens_len = len(input_tokens)
 
