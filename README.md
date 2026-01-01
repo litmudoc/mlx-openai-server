@@ -3,212 +3,172 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
-## Description
-This repository hosts a high-performance API server that provides OpenAI-compatible endpoints for MLX models. Developed using Python and powered by the FastAPI framework, it provides an efficient, scalable, and user-friendly solution for running MLX-based multimodal models locally with an OpenAI-compatible interface. The server supports text, vision, audio processing, and image generation capabilities with enhanced Flux-series model support.
+> 이 프로젝트는 [cubist38/mlx-openai-server](https://github.com/cubist38/mlx-openai-server) 저장소를 fork하여, 언어 모델 기능의 개선을 진행합니다. 실험적이며 안정적이지 않을 수 있습니다. 원본은 링크의 저장소를 사용하세요.
 
-> **Note:** This project currently supports **MacOS with M-series chips** only as it specifically leverages MLX, Apple's framework optimized for Apple Silicon.
+## 설명 (Description)
+이 저장소는 MLX 모델을 위한 OpenAI 호환 엔드포인트를 제공하는 고성능 API 서버를 호스팅합니다. Python으로 개발되고 FastAPI 프레임워크를 기반으로 하는 이 서버는 OpenAI 호환 인터페이스를 통해 로컬에서 MLX 기반 멀티모달 모델을 실행할 수 있는 효율적이고 확장 가능하며 사용자 친화적인 솔루션을 제공합니다. 이 서버는 향상된 Flux 시리즈 모델 지원과 함께 텍스트, 비전, 오디오 처리 및 이미지 생성 기능을 지원합니다.
 
-## Table of Contents
-- [Key Features](#key-features)
-- [Demo](#demo)
-- [OpenAI Compatibility](#openai-compatibility)
-- [Supported Model Types](#supported-model-types)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Starting the Server](#starting-the-server)
-  - [CLI Usage](#cli-usage)
-  - [Logging Configuration](#logging-configuration)
-  - [Using the API](#using-the-api)
-  - [Structured Outputs](#structured-outputs-with-json-schema)
-- [Request Queue System](#request-queue-system)
-- [API Response Schemas](#api-response-schemas)
-- [Example Notebooks](#example-notebooks)
-- [Community & Support](#community--support)
-- [Large Models](#large-models)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
-- [Acknowledgments](#acknowledgments)
+> **참고:** 이 프로젝트는 Apple Silicon에 최적화된 Apple의 프레임워크인 MLX를 활용하므로 현재 **M 시리즈 칩이 탑재된 MacOS**만 지원합니다.
 
----
-
-## Key Features
-- 🚀 **Fast, local OpenAI-compatible API** for MLX models
-- 🖼️ **Multimodal model support** with vision, audio, and text
-- 🎨 **Advanced image generation and editing** with MLX Flux-series models (schnell, dev, Krea-dev, kontext)
-- 🔌 **Drop-in replacement** for OpenAI API in your apps
-- 📈 **Performance and queue monitoring endpoints**
-- 🧑‍💻 **Easy Python and CLI usage**
-- 🛡️ **Robust error handling and request management**
-- 🎛️ **LoRA adapter support** for fine-tuned image generation and editing
-- ⚡ **Configurable quantization** (4-bit, 8-bit, 16-bit) for optimal performance
-- 🧠 **Customizable context length** for memory optimization and performance tuning
+## 목차 (Table of Contents)
+- [주요 기능 (Key Features)](#주요-기능-key-features)
+- [OpenAI 호환성 (OpenAI Compatibility)](#openai-호환성-openai-compatibility)
+- [지원되는 모델 유형 (Supported Model Types)](#지원되는-모델-유형-supported-model-types)
+- [설치 (Installation)](#설치-installation)
+- [사용법 (Usage)](#사용법-usage)
+  - [서버 시작 (Starting the Server)](#서버-시작-starting-the-server)
+  - [CLI 사용법 (CLI Usage)](#cli-사용법-cli-usage)
+  - [로깅 구성 (Logging Configuration)](#로깅-구성-logging-configuration)
+  - [API 사용 (Using the API)](#api-사용-using-the-api)
+  - [구조화된 출력 (Structured Outputs)](#json-스키마를-이용한-구조화된-출력-structured-outputs-with-json-schema)
+- [요청 대기열 시스템 (Request Queue System)](#요청-대기열-시스템-request-queue-system)
+- [API 응답 스키마 (API Response Schemas)](#api-응답-스키마-api-response-schemas)
+- [예제 노트북 (Example Notebooks)](#예제-노트북-example-notebooks)
+- [대규모 모델 (Large Models)](#대규모-모델-large-models)
+- [라이선스 (License)](#라이선스-license)
+- [지원 (Support)](#지원-support)
+- [감사의 말 (Acknowledgments)](#감사의-말-acknowledgments)
 
 ---
 
-## Demo
+## 주요 기능 (Key Features)
+- 🚀 MLX 모델을 위한 **빠르고 로컬에서 실행되는 OpenAI 호환 API**
+- 🖼️ 비전, 오디오 및 텍스트를 포함한 **멀티모달 모델 지원**
+- 🎨 MLX Flux 시리즈 모델(schnell, dev, Krea-dev, kontext)을 사용한 **고급 이미지 생성 및 편집**
+- 🔌 앱에서 OpenAI API를 대체할 수 있는 **드롭인(Drop-in) 교체**
+- 📈 **성능 및 대기열 모니터링 엔드포인트**
+- 🧑‍💻 **쉬운 Python 및 CLI 사용**
+- 🛡️ **견고한 오류 처리 및 요청 관리**
+- 🎛️ 미세 조정된 이미지 생성 및 편집을 위한 **LoRA 어댑터 지원**
+- ⚡ 최적의 성능을 위한 **구성 가능한 양자화** (4-bit, 8-bit, 16-bit)
+- 🧠 메모리 최적화 및 성능 조정을 위한 **사용자 정의 가능한 컨텍스트 길이**
 
-### 🚀 See It In Action
+## OpenAI 호환성 (OpenAI Compatibility)
 
-Check out our [video demonstration](https://youtu.be/-h-AwPNvKiw) to see the server in action! The demo showcases:
+이 서버는 OpenAI API 인터페이스를 구현하여 애플리케이션에서 OpenAI 서비스의 드롭인 대체품으로 사용할 수 있습니다. 다음을 지원합니다:
+- 채팅 완성 (스트리밍 및 비 스트리밍 모두)
+- 멀티모달 상호 작용 (텍스트, 이미지 및 오디오)
+- Flux 시리즈 모델을 사용한 고급 이미지 생성 및 편집
+- 임베딩 생성
+- 함수 호출(Function calling) 및 도구 사용(Tool use)
+- 표준 OpenAI 요청/응답 형식
+- 일반적인 OpenAI 매개변수 (temperature, top_p 등)
 
-- Deploy GLM4.5-Air with `mlx-openai-server` and test code abilities
+## 지원되는 모델 유형 (Supported Model Types)
 
-<p align="center">
-  <a href="https://youtu.be/-h-AwPNvKiw">
-    <img src="https://img.youtube.com/vi/-h-AwPNvKiw/0.jpg" alt="MLX Server OAI-Compatible Demo" width="600">
-  </a>
-</p>
+서버는 6가지 유형의 MLX 모델을 지원합니다:
 
-### 🧠 **NEW: GPT-OSS-20B (MXFP4-Q8) Integration with Opencode**
+1. **텍스트 전용 모델** (`--model-type lm`) - 순수 언어 모델을 위해 `mlx-lm` 라이브러리를 사용합니다.
+2. **멀티모달 모델** (`--model-type multimodal`) - 텍스트, 이미지 및 오디오를 처리할 수 있는 멀티모달 모델을 위해 `mlx-vlm` 라이브러리를 사용합니다.
+3. **이미지 생성 모델** (`--model-type image-generation`) - 향상된 구성의 Flux 시리즈 이미지 생성 모델을 위해 `mflux` 라이브러리를 사용합니다.
+4. **이미지 편집 모델** (`--model-type image-edit`) - Flux 시리즈 이미지 편집 모델을 위해 `mflux` 라이브러리를 사용합니다.
+5. **임베딩 모델** (`--model-type embeddings`) - 최적화된 메모리 관리를 통한 텍스트 임베딩 생성을 위해 `mlx-embeddings` 라이브러리를 사용합니다.
+6. **Whisper 모델** (`--model-type whisper`) - 오디오 전사 및 음성 인식을 위해 `mlx-whisper` 라이브러리를 사용합니다. ⚠️ *ffmpeg 설치가 필요합니다.*
 
-We're excited to announce our latest integration demo featuring **GPT-OSS-20B (MXFP4-Q8)** deployed with mlx-openai-server and integrated into **Opencode** to power advanced coding tasks! 
+### Whisper 모델
 
-This demonstration showcases:
-- **Large Language Model Deployment**: Running GPT-OSS-20B locally with MLX optimization
-- **Advanced Coding Capabilities**: Leveraging the 20B parameter model for complex programming tasks
-- **Seamless Integration**: Drop-in replacement for OpenAI API in Opencode workflows
-- **Performance Optimization**: MXFP4-Q8 quantization for optimal speed and memory usage
+> **⚠️ 참고:** Whisper 모델은 오디오 처리를 위해 ffmpeg가 설치되어 있어야 합니다: `brew install ffmpeg`
 
-<p align="center">
-  <a href="https://youtu.be/MTmR_mPSs6k">
-    <img src="https://img.youtube.com/vi/MTmR_mPSs6k/0.jpg" alt="GPT-OSS-20B Integration Demo" width="600">
-  </a>
-</p>
+### Flux 시리즈 이미지 모델
 
-**Watch the full demo**: [GPT-OSS-20B + Opencode Integration](https://youtu.be/MTmR_mPSs6k)
+서버는 고급 이미지 생성 및 편집을 위해 여러 Flux 및 Qwen 모델 구성을 지원합니다:
 
----
+#### 이미지 생성 모델
+- **`flux-schnell`** - 4개의 기본 단계로 빠른 생성, 가이던스 없음 (빠른 반복 작업에 최적)
+- **`flux-dev`** - 25개의 기본 단계, 3.5 가이던스로 고품질 생성 (품질/속도 균형)
+- **`flux-krea-dev`** - 28개의 기본 단계, 4.5 가이던스로 프리미엄 품질 (최고 품질)
+- **`qwen-image`** - 50개의 기본 단계, 4.0 가이던스의 Qwen 이미지 생성 모델 (고품질 Qwen 기반 생성)
+- **`z-image-turbo`** - 빠른 이미지 생성을 위한 Z-Image Turbo 모델
+- **`fibo`** - 이미지 생성을 위한 Fibo 모델
 
-## OpenAI Compatibility
+#### 이미지 편집 모델
+- **`flux-kontext-dev`** - 28개의 기본 단계, 2.5 가이던스로 문맥 인식 편집 (문맥 이미지 편집에 특화)
+- **`qwen-image-edit`** - 50개의 기본 단계, 4.0 가이던스의 Qwen 이미지 편집 모델 (고품질 Qwen 기반 편집)
 
-This server implements the OpenAI API interface, allowing you to use it as a drop-in replacement for OpenAI's services in your applications. It supports:
-- Chat completions (both streaming and non-streaming)
-- Multimodal interactions (text, images, and audio)
-- Advanced image generation and editing with Flux-series models
-- Embeddings generation
-- Function calling and tool use
-- Standard OpenAI request/response formats
-- Common OpenAI parameters (temperature, top_p, etc.)
+각 구성은 다음을 지원합니다:
+- **양자화 수준**: 메모리/성능 최적화를 위한 4-bit, 8-bit 또는 16-bit
+- **LoRA 어댑터**: 미세 조정된 생성 및 편집을 위한 사용자 정의 스케일링이 포함된 다중 LoRA 경로 (모든 Flux 및 Qwen 이미지 모델 지원).
+- **사용자 정의 매개변수**: 단계(Steps), 가이던스(Guidance), 네거티브 프롬프트(Negative prompts) 등
 
-## Supported Model Types
+### 컨텍스트 길이 구성 (Context Length Configuration)
 
-The server supports six types of MLX models:
+서버는 메모리 사용량과 성능을 최적화하기 위해 언어 모델에 대한 사용자 정의 가능한 컨텍스트 길이를 지원합니다:
 
-1. **Text-only models** (`--model-type lm`) - Uses the `mlx-lm` library for pure language models
-2. **Multimodal models** (`--model-type multimodal`) - Uses the `mlx-vlm` library for multimodal models that can process text, images, and audio
-3. **Image generation models** (`--model-type image-generation`) - Uses the `mflux` library for Flux-series image generation models with enhanced configurations
-4. **Image editing models** (`--model-type image-edit`) - Uses the `mflux` library for Flux-series image editing models
-5. **Embeddings models** (`--model-type embeddings`) - Uses the `mlx-embeddings` library for text embeddings generation with optimized memory management
-6. **Whisper models** (`--model-type whisper`) - Uses the `mlx-whisper` library for audio transcription and speech recognition ⚠️ *Requires ffmpeg installation*
+- **기본 동작**: `--context-length`가 지정되지 않으면 서버는 모델의 기본 컨텍스트 길이를 사용합니다.
+- **메모리 최적화**: 더 작은 컨텍스트 길이를 설정하면 특히 대형 모델의 경우 메모리 사용량을 크게 줄일 수 있습니다.
+- **성능 조정**: 특정 사용 사례 및 사용 가능한 시스템 리소스에 따라 컨텍스트 길이를 조정합니다.
+- **지원되는 모델**: 컨텍스트 길이 구성은 텍스트 전용(`lm`) 및 멀티모달(`multimodal`) 모델 유형 모두에서 작동합니다.
+- **프롬프트 캐싱**: 서버는 컨텍스트 길이가 지정될 때 메모리 사용을 최적화하기 위해 프롬프트 캐싱을 사용합니다.
 
-### Whisper Models
+**사용 사례 예:**
+- **짧은 대화**: 채팅 애플리케이션에는 더 작은 컨텍스트 길이(예: 2048, 4096)를 사용하세요.
+- **문서 처리**: 긴 문서 분석에는 더 큰 컨텍스트 길이(예: 8192, 16384)를 사용하세요.
+- **메모리가 제한된 시스템**: 제한된 RAM에 더 큰 모델을 맞추려면 컨텍스트 길이를 줄이세요.
 
-> **⚠️ Note:** Whisper models require ffmpeg to be installed for audio processing: `brew install ffmpeg`
+### 사용자 정의 채팅 템플릿 (Custom Chat Templates)
 
-### Flux-Series Image Models
+서버는 언어 모델(`lm`) 및 멀티모달 모델(`multimodal`)을 위한 사용자 정의 채팅 템플릿을 지원합니다. 채팅 템플릿은 대화 메시지가 모델로 전송되기 전에 형식이 지정되는 방식을 정의합니다.
 
-The server supports multiple Flux and Qwen model configurations for advanced image generation and editing:
+**기능:**
+- **사용자 정의 서식**: 모델의 기본 채팅 템플릿을 사용자 정의 Jinja2 템플릿으로 덮어씁니다.
+- **모델 호환성**: 텍스트 전용 및 멀티모달 모델 모두에서 작동합니다.
+- **파일 기반 구성**: 서버를 시작할 때 `.jinja` 템플릿 파일의 경로를 지정합니다.
 
-#### Image Generation Models
-- **`flux-schnell`** - Fast generation with 4 default steps, no guidance (best for quick iterations)
-- **`flux-dev`** - High-quality generation with 25 default steps, 3.5 guidance (balanced quality/speed)
-- **`flux-krea-dev`** - Premium quality with 28 default steps, 4.5 guidance (highest quality)
-- **`qwen-image`** - Qwen image generation model with 50 default steps, 4.0 guidance (high-quality Qwen-based generation)
-- **`z-image-turbo`** - Z-Image Turbo model for fast image generation
-- **`fibo`** - Fibo model for image generation
-
-#### Image Editing Models
-- **`flux-kontext-dev`** - Context-aware editing with 28 default steps, 2.5 guidance (specialized for contextual image editing)
-- **`qwen-image-edit`** - Qwen image editing model with 50 default steps, 4.0 guidance (high-quality Qwen-based editing)
-
-Each configuration supports:
-- **Quantization levels**: 4-bit, 8-bit, or 16-bit for memory/performance optimization
-- **LoRA adapters**: Multiple LoRA paths with custom scaling for fine-tuned generation and editing (supported for all Flux and Qwen image models).
-- **Custom parameters**: Steps, guidance, negative prompts, and more
-
-### Context Length Configuration
-
-The server supports customizable context length for language models to optimize memory usage and performance:
-
-- **Default behavior**: When `--context-length` is not specified, the server uses the model's default context length
-- **Memory optimization**: Setting a smaller context length can significantly reduce memory usage, especially for large models
-- **Performance tuning**: Adjust context length based on your specific use case and available system resources
-- **Supported models**: Context length configuration works with both text-only (`lm`) and multimodal (`multimodal`) model types
-- **Prompt caching**: The server uses prompt caching to optimize memory usage when context length is specified
-
-**Example use cases:**
-- **Short conversations**: Use smaller context lengths (e.g., 2048, 4096) for chat applications
-- **Document processing**: Use larger context lengths (e.g., 8192, 16384) for long document analysis
-- **Memory-constrained systems**: Reduce context length to fit larger models in limited RAM
-
-### Custom Chat Templates
-
-The server supports custom chat templates for language models (`lm`) and multimodal models (`multimodal`). Chat templates define how conversation messages are formatted before being sent to the model.
-
-**Features:**
-- **Custom formatting**: Override the model's default chat template with your own Jinja2 template
-- **Model compatibility**: Works with both text-only and multimodal models
-- **File-based configuration**: Specify a path to a `.jinja` template file when launching the server
-
-**Usage:**
+**사용법:**
 ```bash
-# Launch server with custom chat template
+# 사용자 정의 채팅 템플릿으로 서버 시작
 python -m app.main \
   --model-path <path-to-model> \
   --model-type lm \
   --chat-template-file /path/to/custom_template.jinja
 ```
 
-**Template file format:**
-Chat templates use Jinja2 syntax and should follow the standard format expected by the tokenizer/processor. The template receives a `messages` variable containing the conversation history.
+**템플릿 파일 형식:**
+채팅 템플릿은 Jinja2 구문을 사용하며 토크나이저/프로세서가 예상하는 표준 형식을 따라야 합니다. 템플릿은 대화 기록이 포함된 `messages` 변수를 받습니다.
 
-**Example use cases:**
-- **Custom prompt formatting**: Modify how system prompts, user messages, and assistant responses are formatted
-- **Model-specific requirements**: Adapt templates for models that require specific formatting
-- **Fine-tuning compatibility**: Use templates that match your fine-tuning data format
+**사용 사례 예:**
+- **사용자 정의 프롬프트 서식**: 시스템 프롬프트, 사용자 메시지 및 어시스턴트 응답 형식을 수정합니다.
+- **모델별 요구 사항**: 특정 서식이 필요한 모델에 맞게 템플릿을 조정합니다.
+- **파인 튜닝 호환성**: 파인 튜닝 데이터 형식과 일치하는 템플릿을 사용합니다.
 
-> **Note:** If the chat template file does not exist, the server will raise an error during startup. Make sure the file path is correct and the file is accessible.
+> **참고:** 채팅 템플릿 파일이 존재하지 않으면 서버 시작 중에 오류가 발생합니다. 파일 경로가 올바르고 파일에 액세스할 수 있는지 확인하세요.
 
-## Installation
+## 설치 (Installation)
 
-Follow these steps to set up the MLX-powered server:
+MLX 기반 서버를 설정하려면 다음 단계를 따르세요:
 
-### Prerequisites
-- MacOS with Apple Silicon (M-series) chip
-- Python 3.11 (native ARM version)
-- pip package manager
+### 전제 조건
+- Apple Silicon (M 시리즈) 칩이 탑재된 MacOS
+- Python 3.11 (기본 ARM 버전)
+- pip 패키지 관리자
 
-### Setup Steps
-1. Create a virtual environment for the project:
+### 설정 단계
+1. 프로젝트를 위한 가상 환경을 생성합니다:
     ```bash
-    python3.11 -m venv oai-compat-server
+    python3.11 -m venv mlx-openai-server
     ```
 
-2. Activate the virtual environment:
+2. 가상 환경을 활성화합니다:
     ```bash
-    source oai-compat-server/bin/activate
+    source mlx-openai-server/bin/activate
     ```
 
-3. Install the package:
+3. 패키지를 설치합니다:
     ```bash
-    # Option 1: Install from PyPI
-    pip install mlx-openai-server
-
-    # Option 2: Install directly from GitHub
-    pip install git+https://github.com/cubist38/mlx-openai-server.git
+    # 옵션 1: GitHub에서 직접 설치
+    pip install git+https://github.com/akirose/mlx-openai-server.git
     
-    # Option 3: Clone and install in development mode
-    git clone https://github.com/cubist38/mlx-openai-server.git
+    # 옵션 2: 복제 후 개발 모드로 설치
+    git clone https://github.com/akirose/mlx-openai-server.git
     cd mlx-openai-server
     pip install -e .
     ```
 
-### Using Conda (Recommended)
+### Conda 사용 (권장)
 
-For better environment management and to avoid architecture issues, we recommend using conda:
+더 나은 환경 관리와 아키텍처 문제를 피하기 위해 conda 사용을 권장합니다:
 
-1. **Install conda** (if not already installed):
+1. **Conda 설치** (아직 설치되지 않은 경우):
     ```bash
     mkdir -p ~/miniconda3
     curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh -o ~/miniconda3/miniconda.sh
@@ -218,83 +178,80 @@ For better environment management and to avoid architecture issues, we recommend
     conda init --all
     ```
 
-2. **Create a new conda environment** with Python 3.11:
+2. Python 3.11로 **새 conda 환경 생성**:
     ```bash
     conda create -n mlx-server python=3.11
     conda activate mlx-server
     ```
 
-3. **Install the package**:
+3. **패키지 설치**:
     ```bash
-    # Option 1: Install from PyPI
-    pip install mlx-openai-server
-
-    # Option 2: Install directly from GitHub
-    pip install git+https://github.com/cubist38/mlx-openai-server.git
+    # 옵션 1: GitHub에서 직접 설치
+    pip install git+https://github.com/akirose/mlx-openai-server.git
     
-    # Option 3: Clone and install in development mode
-    git clone https://github.com/cubist38/mlx-openai-server.git
+    # 옵션 2: 복제 후 개발 모드로 설치
+    git clone https://github.com/akirose/mlx-openai-server.git
     cd mlx-openai-server
     pip install -e .
     ```
 
-### Optional Dependencies
+### 선택적 종속성 (Optional Dependencies)
 
-The server supports optional dependencies for enhanced functionality:
+서버는 향상된 기능을 위해 선택적 종속성을 지원합니다:
 
-#### Base Installation
+#### 기본 설치
 ```bash
-pip install mlx-openai-server
+pip install git+https://github.com/akirose/mlx-openai-server.git
 ```
-**Includes:**
-- Text-only language models (`--model-type lm`)
-- Multimodal models (`--model-type multimodal`) 
-- Embeddings models (`--model-type embeddings`)
-- All core API endpoints and functionality
+**포함 내용:**
+- 텍스트 전용 언어 모델 (`--model-type lm`)
+- 멀티모달 모델 (`--model-type multimodal`) 
+- 임베딩 모델 (`--model-type embeddings`)
+- 모든 핵심 API 엔드포인트 및 기능
 
-#### Image Generation & Editing Support
-The server includes support for image generation and editing capabilities:
+#### 이미지 생성 및 편집 지원
+서버는 이미지 생성 및 편집 기능을 지원합니다:
 
-**Additional features:**
-- Image generation models (`--model-type image-generation`)
-- Image editing models (`--model-type image-edit`)
-- MLX Flux-series model support
-- Qwen Image model support
-- LoRA adapter support for fine-tuned generation and editing
+**추가 기능:**
+- 이미지 생성 모델 (`--model-type image-generation`)
+- 이미지 편집 모델 (`--model-type image-edit`)
+- MLX Flux 시리즈 모델 지원
+- Qwen Image 모델 지원
+- 미세 조정된 생성 및 편집을 위한 LoRA 어댑터 지원
 
-#### Whisper Models Support
-For whisper models to work properly, you need to install ffmpeg:
+#### Whisper 모델 지원
+Whisper 모델이 제대로 작동하려면 ffmpeg를 설치해야 합니다:
 
 ```bash
-# Install ffmpeg using Homebrew
+# Homebrew를 사용하여 ffmpeg 설치
 brew install ffmpeg
 ```
 
-**Features with ffmpeg:**
-- Audio transcription models (`--model-type whisper`)
-- Speech recognition capabilities
-- Support for various audio formats (WAV, MP3, M4A, etc.)
+**ffmpeg 포함 기능:**
+- 오디오 전사 모델 (`--model-type whisper`)
+- 음성 인식 기능
+- 다양한 오디오 형식 지원 (WAV, MP3, M4A 등)
 
-> **Note:** Whisper models require ffmpeg for audio processing. Make sure to install it before using whisper model types.
+> **참고:** Whisper 모델은 오디오 처리를 위해 ffmpeg가 필요합니다. whisper 모델 유형을 사용하기 전에 설치했는지 확인하세요.
 
-### Troubleshooting
-**Issue:** My OS and Python versions meet the requirements, but `pip` cannot find a matching distribution.
+### 문제 해결
+**문제:** OS 및 Python 버전이 요구 사항을 충족하지만 `pip`가 일치하는 배포판을 찾을 수 없습니다.
 
-**Cause:** You might be using a non-native Python version. Run the following command to check:
+**원인:** 네이티브가 아닌 Python 버전을 사용하고 있을 수 있습니다. 다음 명령을 실행하여 확인하세요:
 ```bash
 python -c "import platform; print(platform.processor())"
 ```
-If the output is `i386` (on an M-series machine), you are using a non-native Python. Switch to a native Python version. A good approach is to use [Conda](https://stackoverflow.com/questions/65415996/how-to-specify-the-architecture-or-platform-for-a-new-conda-environment-apple).
+출력이 `i386` (M 시리즈 머신에서)이면 네이티브가 아닌 Python을 사용하고 있는 것입니다. 네이티브 Python 버전으로 전환하세요. 좋은 방법은 [Conda](https://stackoverflow.com/questions/65415996/how-to-specify-the-architecture-or-platform-for-a-new-conda-environment-apple)를 사용하는 것입니다.
 
-## Usage
+## 사용법 (Usage)
 
-### Starting the Server
+### 서버 시작 (Starting the Server)
 
-You can start the MLX server using either the Python module or the CLI command. Both methods support the same parameters, including logging configuration options.
+Python 모듈 또는 CLI 명령을 사용하여 MLX 서버를 시작할 수 있습니다. 두 방법 모두 로깅 구성 옵션을 포함한 동일한 매개변수를 지원합니다.
 
-#### Method 1: Python Module
+#### 방법 1: Python 모듈
 ```bash
-# For text-only or multimodal models
+# 텍스트 전용 또는 멀티모달 모델의 경우
 python -m app.main \
   --model-path <path-to-mlx-model> \
   --model-type <lm|multimodal> \
@@ -302,7 +259,7 @@ python -m app.main \
   --queue-timeout 300 \
   --queue-size 100
 
-# For image generation models (Flux-series, Qwen, Z-Image Turbo, or Fibo)
+# 이미지 생성 모델의 경우 (Flux 시리즈, Qwen, Z-Image Turbo 또는 Fibo)
 python -m app.main \
   --model-type image-generation \
   --model-path <path-to-local-model> \
@@ -312,7 +269,7 @@ python -m app.main \
   --queue-timeout 300 \
   --queue-size 100
 
-# For image editing models (Flux-series or Qwen)
+# 이미지 편집 모델의 경우 (Flux 시리즈 또는 Qwen)
 python -m app.main \
   --model-type image-edit \
   --model-path <path-to-local-model> \
@@ -322,7 +279,7 @@ python -m app.main \
   --queue-timeout 300 \
   --queue-size 100
 
-# For embeddings models
+# 임베딩 모델의 경우
 python -m app.main \
   --model-type embeddings \
   --model-path <embeddings-model-path> \
@@ -330,7 +287,7 @@ python -m app.main \
   --queue-timeout 300 \
   --queue-size 100
 
-# For whisper models
+# Whisper 모델의 경우
 python -m app.main \
   --model-type whisper \
   --model-path <whisper-model-path> \
@@ -338,7 +295,7 @@ python -m app.main \
   --queue-timeout 600 \
   --queue-size 50
 
-# With logging configuration options
+# 로깅 구성 옵션 포함
 python -m app.main \
   --model-path <path-to-mlx-model> \
   --model-type lm \
@@ -352,133 +309,90 @@ python -m app.main \
   --log-level DEBUG
 ```
 
-#### Method 2: CLI Command
+#### 서버 매개변수
+- `--model-path`: MLX 모델 디렉터리 경로(로컬 경로 또는 Hugging Face 모델 저장소). `lm`, `multimodal`, `embeddings`, `image-generation`, `image-edit`, `whisper` 모델 유형에 필요합니다.
+- `--model-type`: 실행할 모델 유형:
+  - 텍스트 전용 모델의 경우 `lm`
+  - 멀티모달 모델(텍스트, 비전, 오디오)의 경우 `multimodal`
+  - 이미지 생성 모델의 경우 `image-generation`
+  - 이미지 편집 모델의 경우 `image-edit`
+  - 임베딩 모델의 경우 `embeddings`
+  - Whisper 모델(오디오 전사)의 경우 `whisper`
+  - 기본값: `lm`
+- `--context-length`: 언어 모델의 컨텍스트 길이. 텍스트 처리 및 메모리 사용 최적화를 위한 최대 시퀀스 길이를 제어합니다. 기본값: `None` (모델의 기본 컨텍스트 길이 사용).
+- `--config-name`: 사용할 모델 구성. `image-generation` 및 `image-edit` 모델 유형에만 사용됩니다:
+  - `image-generation`의 경우: `flux-schnell`, `flux-dev`, `flux-krea-dev`, `qwen-image`, `z-image-turbo`, `fibo`
+  - `image-edit`의 경우: `flux-kontext-dev`, `qwen-image-edit`
+  - 기본값: image-generation의 경우 `flux-schnell`, image-edit의 경우 `flux-kontext-dev`
+- `--quantize`: Flux 모델의 양자화 수준. 사용 가능한 옵션: `4`, `8`, `16`. 기본값: `8`
+- `--lora-paths`: 쉼표로 구분된 LoRA 어댑터 파일 경로.
+- `--lora-scales`: 쉼표로 구분된 LoRA 어댑터 스케일 팩터. LoRA 경로 수와 일치해야 합니다.
+- `--max-concurrency`: 최대 동시 요청 수 (기본값: 1)
+- `--queue-timeout`: 요청 시간 초과(초) (기본값: 300)
+- `--queue-size`: 대기 중인 요청의 최대 대기열 크기 (기본값: 100)
+- `--port`: 서버를 실행할 포트 (기본값: 8000)
+- `--host`: 서버를 실행할 호스트 (기본값: 0.0.0.0)
+- `--disable-auto-resize`: 자동 모델 크기 조정을 비활성화합니다. Vision Language Models에서만 작동합니다.
+- `--enable-auto-tool-choice`: 자동 도구 선택(Auto tool choice)을 활성화합니다. 언어 모델(`lm` 또는 `multimodal` 모델 유형)에서만 작동합니다.
+- `--tool-call-parser`: 자동 감지 대신 사용할 도구 호출 파서(Tool call parser)를 지정합니다. 언어 모델(`lm` 또는 `multimodal` 모델 유형)에서만 작동합니다. 사용 가능한 옵션: `qwen3`, `glm4_moe`, `qwen3_moe`, `qwen3_next`, `qwen3_vl`, `harmony`, `minimax`.
+- `--reasoning-parser`: 자동 감지 대신 사용할 추론 파서(Reasoning parser)를 지정합니다. 언어 모델(`lm` 또는 `multimodal` 모델 유형)에서만 작동합니다. 사용 가능한 옵션: `qwen3`, `glm4_moe`, `qwen3_moe`, `qwen3_next`, `qwen3_vl`, `harmony`, `minimax`.
+- `--trust-remote-code`: 모델을 로드할 때 `trust_remote_code`를 활성화합니다. 이를 통해 모델 저장소에서 사용자 정의 코드를 로드할 수 있습니다. 기본값: `False` (비활성화됨). `lm` 또는 `multimodal` 모델 유형에서만 작동합니다.
+- `--chat-template-file`: 사용자 정의 채팅 템플릿 파일의 경로입니다. 언어 모델(`lm`) 및 멀티모달 모델(`multimodal`)에서만 작동합니다. 기본값: `None` (모델의 기본 채팅 템플릿 사용).
+- `--log-file`: 로그 파일 경로입니다. 지정하지 않으면 기본적으로 'logs/app.log'에 로그가 기록됩니다.
+- `--no-log-file`: 파일 로깅을 완전히 비활성화합니다. 콘솔 출력만 표시됩니다.
+- `--log-level`: 로깅 수준을 설정합니다. 선택 사항: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. 기본값: `INFO`.
+
+### 파서 구성 (Parser Configuration)
+
+서버는 도구 호출 및 추론/생각(thinking) 내용 추출을 위한 파서의 수동 구성을 지원합니다. 파서가 명시적으로 지정되지 않으면 기본적으로 `None`이 되며, 이는 파싱이 수행되지 않음을 의미합니다.
+
+#### 사용 가능한 파서
+
+다음 파서는 도구 호출 및 추론 파싱 모두에 사용할 수 있습니다:
+
+- **`qwen3`**: Qwen3 모델 형식용 파서
+- **`glm4_moe`**: GLM4 MoE 모델 형식용 파서
+- **`qwen3_moe`**: Qwen3 MoE 모델 형식용 파서
+- **`qwen3_next`**: Qwen3 Next 모델 형식용 파서
+- **`qwen3_vl`**: Qwen3 Vision-Language 모델 형식용 파서
+- **`harmony`**: Harmony/GPT-OSS 모델용 통합 파서 (thinking과 tools 모두 처리)
+- **`minimax`**: MiniMax 모델 형식용 파서
+
+#### 파서 매개변수
+
+- **`--tool-call-parser`**: 모델 응답에서 도구 호출을 추출하는 데 사용할 파서를 지정합니다.
+- **`--reasoning-parser`**: 모델 응답에서 추론/생각 내용을 추출하는 데 사용할 파서를 지정합니다.
+- **`--enable-auto-tool-choice`**: 도구 호출 사용 시 자동 도구 선택을 활성화합니다.
+
+#### 사용 예
+
+**파서가 없는 기본 사용 (기본값):**
 ```bash
-# For text-only or multimodal models
-mlx-openai-server launch \
-  --model-path <path-to-mlx-model> \
-  --model-type <lm|multimodal> \
-
-
-# For image generation models (Flux-series, Qwen, Z-Image Turbo, or Fibo)
-mlx-openai-server launch \
-  --model-type image-generation \
-  --model-path <path-to-local-model> \
-  --config-name <flux-schnell|flux-dev|flux-krea-dev|qwen-image|z-image-turbo|fibo> \
-  --quantize 8 \
-
-
-# For image editing models (Flux-series or Qwen)
-mlx-openai-server launch \
-  --model-type image-edit \
-  --model-path <path-to-local-model> \
-  --config-name <flux-kontext-dev|qwen-image-edit> \
-  --quantize 8 \
-
-
-# For whisper models
-mlx-openai-server launch \
-  --model-path mlx-community/whisper-large-v3-mlx \
-  --model-type whisper \
-  --max-concurrency 1 \
-  --queue-timeout 600 \
-  --queue-size 50 \
-
-
-# With LoRA adapters
-mlx-openai-server launch \
-  --model-type image-generation \
-  --model-path <path-to-local-flux-model> \
-  --config-name flux-dev \
-  --lora-paths "/path/to/lora1.safetensors,/path/to/lora2.safetensors" \
-  --lora-scales "0.8,0.6" \
-
-```
-
-#### Server Parameters
-- `--model-path`: Path to the MLX model directory (local path or Hugging Face model repository). Required for `lm`, `multimodal`, `embeddings`, `image-generation`, `image-edit`, and `whisper` model types.
-- `--model-type`: Type of model to run:
-  - `lm` for text-only models
-  - `multimodal` for multimodal models (text, vision, audio)
-  - `image-generation` for image generation models
-  - `image-edit` for image editing models
-  - `embeddings` for embeddings models
-  - `whisper` for whisper models (audio transcription)
-  - Default: `lm`
-- `--context-length`: Context length for language models. Controls the maximum sequence length for text processing and memory usage optimization. Default: `None` (uses model's default context length).
-- `--config-name`: Model configuration to use. Only used for `image-generation` and `image-edit` model types:
-  - For `image-generation`: `flux-schnell`, `flux-dev`, `flux-krea-dev`, `qwen-image`, `z-image-turbo`, `fibo`
-  - For `image-edit`: `flux-kontext-dev`, `qwen-image-edit`
-  - Default: `flux-schnell` for image-generation, `flux-kontext-dev` for image-edit
-- `--quantize`: Quantization level for Flux models. Available options: `4`, `8`, `16`. Default: `8`
-- `--lora-paths`: Comma-separated paths to LoRA adapter files.
-- `--lora-scales`: Comma-separated scale factors for LoRA adapters. Must match the number of LoRA paths.
-- `--max-concurrency`: Maximum number of concurrent requests (default: 1)
-- `--queue-timeout`: Request timeout in seconds (default: 300)
-- `--queue-size`: Maximum queue size for pending requests (default: 100)
-- `--port`: Port to run the server on (default: 8000)
-- `--host`: Host to run the server on (default: 0.0.0.0)
-- `--disable-auto-resize`: Disable automatic model resizing. Only works for Vision Language Models.
-- `--enable-auto-tool-choice`: Enable automatic tool choice. Only works with language models (`lm` or `multimodal` model types).
-- `--tool-call-parser`: Specify tool call parser to use instead of auto-detection. Only works with language models (`lm` or `multimodal` model types). Available options: `qwen3`, `glm4_moe`, `qwen3_moe`, `qwen3_next`, `qwen3_vl`, `harmony`, `minimax`.
-- `--reasoning-parser`: Specify reasoning parser to use instead of auto-detection. Only works with language models (`lm` or `multimodal` model types). Available options: `qwen3`, `glm4_moe`, `qwen3_moe`, `qwen3_next`, `qwen3_vl`, `harmony`, `minimax`.
-- `--trust-remote-code`: Enable `trust_remote_code` when loading models. This allows loading custom code from model repositories. Default: `False` (disabled). Only works with `lm` or `multimodal` model types.
-- `--chat-template-file`: Path to a custom chat template file. Only works with language models (`lm`) and multimodal models (`multimodal`). Default: `None` (uses model's default chat template).
-- `--log-file`: Path to log file. If not specified, logs will be written to 'logs/app.log' by default.
-- `--no-log-file`: Disable file logging entirely. Only console output will be shown.
-- `--log-level`: Set the logging level. Choices: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Default: `INFO`.
-
-### Parser Configuration
-
-The server supports manual configuration of parsers for tool calls and reasoning/reasoning content extraction. When parsers are not explicitly specified, they will be `None` by default, meaning no parsing will be performed.
-
-#### Available Parsers
-
-The following parsers are available for both tool call and reasoning parsing:
-
-- **`qwen3`**: Parser for Qwen3 model formats
-- **`glm4_moe`**: Parser for GLM4 MoE model formats
-- **`qwen3_moe`**: Parser for Qwen3 MoE model formats
-- **`qwen3_next`**: Parser for Qwen3 Next model formats
-- **`qwen3_vl`**: Parser for Qwen3 Vision-Language model formats
-- **`harmony`**: Unified parser for Harmony/GPT-OSS models (handles both thinking and tools)
-- **`minimax`**: Parser for MiniMax model formats
-
-#### Parser Parameters
-
-- **`--tool-call-parser`**: Specify which parser to use for extracting tool calls from model responses
-- **`--reasoning-parser`**: Specify which parser to use for extracting reasoning/thinking content from model responses
-- **`--enable-auto-tool-choice`**: Enable automatic tool choice when using tool calling
-
-#### Usage Examples
-
-**Basic usage without parsers (default):**
-```bash
-mlx-openai-server launch \
+python -m app.main launch \
   --model-path /path/to/model \
   --model-type lm
 ```
 
-**With tool call parser only:**
+**도구 호출 파서만 사용:**
 ```bash
-mlx-openai-server launch \
+python -m app.main launch \
   --model-path /path/to/model \
   --model-type lm \
   --tool-call-parser qwen3
 ```
 
-**With both parsers:**
+**두 파서 모두 사용:**
 ```bash
-mlx-openai-server launch \
+python -m app.main launch \
   --model-path /path/to/model \
   --model-type lm \
   --tool-call-parser qwen3 \
   --reasoning-parser qwen3
 ```
 
-**With auto tool choice enabled:**
+**자동 도구 선택 활성화:**
 ```bash
-mlx-openai-server launch \
+python -m app.main launch \
   --model-path /path/to/model \
   --model-type lm \
   --enable-auto-tool-choice \
@@ -486,20 +400,20 @@ mlx-openai-server launch \
   --reasoning-parser qwen3
 ```
 
-**Using Harmony parser (unified parser):**
+**Harmony 파서 사용 (통합 파서):**
 ```bash
-mlx-openai-server launch \
+python -m app.main launch \
   --model-path /path/to/model \
   --model-type lm \
   --reasoning-parser harmony \
   --tool-call-parser harmony
 ```
 
-> **Note:** Parser configuration is only applicable to language models (`lm` or `multimodal` model types). If parsers are not specified, the server will not perform any parsing, and raw model responses will be returned.
+> **참고:** 파서 구성은 언어 모델(`lm` 또는 `multimodal` 모델 유형)에만 적용됩니다. 파서를 지정하지 않으면 서버는 파싱을 수행하지 않으며 원시 모델 응답이 반환됩니다.
 
-#### Example Configurations
+#### 구성 예
 
-**Text-only model:**
+**텍스트 전용 모델:**
 ```bash
 python -m app.main \
   --model-path mlx-community/gemma-3-4b-it-4bit \
@@ -510,7 +424,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-**Multimodal model:**
+**멀티모달 모델:**
 ```bash
 python -m app.main \
   --model-path mlx-community/llava-phi-3-vision-4bit \
@@ -521,7 +435,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-**Model with trust_remote_code enabled:**
+**trust_remote_code가 활성화된 모델:**
 ```bash
 python -m app.main \
   --model-path <path-to-model-requiring-custom-code> \
@@ -532,7 +446,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-**Model with custom chat template:**
+**사용자 정의 채팅 템플릿이 있는 모델:**
 ```bash
 python -m app.main \
   --model-path <path-to-model> \
@@ -543,9 +457,9 @@ python -m app.main \
   --queue-size 100
 ```
 
-**Image generation models:**
+**이미지 생성 모델:**
 
-*Fast generation with Schnell:*
+*Schnell로 빠른 생성:*
 ```bash
 python -m app.main \
   --model-type image-generation \
@@ -557,7 +471,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*High-quality generation with Dev:*
+*Dev로 고품질 생성:*
 ```bash
 python -m app.main \
   --model-type image-generation \
@@ -569,7 +483,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*Premium quality with Krea-Dev:*
+*Krea-Dev로 프리미엄 품질 생성:*
 ```bash
 python -m app.main \
   --model-type image-generation \
@@ -581,7 +495,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*High-quality generation with Qwen Image:*
+*Qwen Image로 고품질 생성:*
 ```bash
 python -m app.main \
   --model-type image-generation \
@@ -593,17 +507,17 @@ python -m app.main \
   --queue-size 100
 ```
 
-*Fast generation with Z-Image Turbo:*
+*Z-Image Turbo로 빠른 생성:*
 ```bash
-mlx-openai-server launch --model-path z-image-turbo --model-type image-generation --config-name z-image-turbo
+python -m app.main launch --model-path z-image-turbo --model-type image-generation --config-name z-image-turbo
 ```
 
-*Generation with Fibo:*
+*Fibo로 생성:*
 ```bash
-mlx-openai-server launch --model-path fibo --model-type image-generation --config-name fibo
+python -m app.main launch --model-path fibo --model-type image-generation --config-name fibo
 ```
 
-*Image editing with Kontext:*
+*Kontext로 이미지 편집:*
 ```bash
 python -m app.main \
   --model-type image-edit \
@@ -615,7 +529,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*Image editing with Qwen Image Edit:*
+*Qwen Image Edit으로 이미지 편집:*
 ```bash
 python -m app.main \
   --model-type image-edit \
@@ -627,7 +541,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*With LoRA adapters (image generation):*
+*LoRA 어댑터 포함 (이미지 생성):*
 ```bash
 python -m app.main \
   --model-type image-generation \
@@ -641,7 +555,7 @@ python -m app.main \
   --queue-size 100
 ```
 
-*With LoRA adapters (image editing):*
+*LoRA 어댑터 포함 (이미지 편집):*
 ```bash
 python -m app.main \
   --model-type image-edit \
@@ -655,9 +569,9 @@ python -m app.main \
   --queue-size 100
 ```
 
-**Whisper models:**
+**Whisper 모델:**
 
-*Audio transcription with Whisper:*
+*Whisper로 오디오 전사:*
 ```bash
 python -m app.main \
   --model-type whisper \
@@ -667,140 +581,140 @@ python -m app.main \
   --queue-size 50
 ```
 
-### CLI Usage
+### CLI 사용법 (CLI Usage)
 
-The server provides a convenient CLI interface for easy startup and management:
+서버는 쉬운 시작 및 관리를 위한 편리한 CLI 인터페이스를 제공합니다:
 
-**Check version and help:**
+**버전 및 도움말 확인:**
 ```bash
-mlx-openai-server --version
-mlx-openai-server --help
-mlx-openai-server launch --help
+python -m app.main --version
+python -m app.main --help
+python -m app.main launch --help
 ```
 
-**Launch the server:**
+**서버 시작:**
 ```bash
-# For text-only or multimodal models
-mlx-openai-server launch --model-path <path-to-mlx-model> --model-type <lm|multimodal> --context-length 8192
+# 텍스트 전용 또는 멀티모달 모델의 경우
+python -m app.main launch --model-path <path-to-mlx-model> --model-type <lm|multimodal> --context-length 8192
 
-# For image generation models (Flux-series, Qwen, Z-Image Turbo, or Fibo)
-mlx-openai-server launch --model-type image-generation --model-path <path-to-local-model> --config-name <flux-schnell|flux-dev|flux-krea-dev|qwen-image|z-image-turbo|fibo>
+# 이미지 생성 모델의 경우 (Flux 시리즈, Qwen, Z-Image Turbo 또는 Fibo)
+python -m app.main launch --model-type image-generation --model-path <path-to-local-model> --config-name <flux-schnell|flux-dev|flux-krea-dev|qwen-image|z-image-turbo|fibo>
 
-# For image editing models (Flux-series or Qwen)
-mlx-openai-server launch --model-type image-edit --model-path <path-to-local-model> --config-name <flux-kontext-dev|qwen-image-edit>
+# 이미지 편집 모델의 경우 (Flux 시리즈 또는 Qwen)
+python -m app.main launch --model-type image-edit --model-path <path-to-local-model> --config-name <flux-kontext-dev|qwen-image-edit>
 
-# For whisper models
-mlx-openai-server launch --model-path mlx-community/whisper-large-v3-mlx --model-type whisper
+# Whisper 모델의 경우
+python -m app.main launch --model-path mlx-community/whisper-large-v3-mlx --model-type whisper
 
-# With LoRA adapters (image generation)
-mlx-openai-server launch --model-type image-generation --model-path <path-to-local-flux-model> --config-name flux-dev --lora-paths "/path/to/lora1.safetensors,/path/to/lora2.safetensors" --lora-scales "0.8,0.6"
+# LoRA 어댑터 포함 (이미지 생성)
+python -m app.main launch --model-type image-generation --model-path <path-to-local-flux-model> --config-name flux-dev --lora-paths "/path/to/lora1.safetensors,/path/to/lora2.safetensors" --lora-scales "0.8,0.6"
 
-# With LoRA adapters (image editing)
-mlx-openai-server launch --model-type image-edit --model-path <path-to-local-flux-model> --config-name flux-kontext-dev --lora-paths "/path/to/lora1.safetensors,/path/to/lora2.safetensors" --lora-scales "0.8,0.6"
+# LoRA 어댑터 포함 (이미지 편집)
+python -m app.main launch --model-type image-edit --model-path <path-to-local-flux-model> --config-name flux-kontext-dev --lora-paths "/path/to/lora1.safetensors,/path/to/lora2.safetensors" --lora-scales "0.8,0.6"
 
-# With custom logging configuration
-mlx-openai-server launch --model-path <path-to-mlx-model> --model-type lm --log-file /tmp/server.log --log-level DEBUG
+# 사용자 정의 로깅 구성 포함
+python -m app.main launch --model-path <path-to-mlx-model> --model-type lm --log-file /tmp/server.log --log-level DEBUG
 
-# Disable file logging (console only)
-mlx-openai-server launch --model-path <path-to-mlx-model> --model-type lm --no-log-file
+# 파일 로깅 비활성화 (콘솔만)
+python -m app.main launch --model-path <path-to-mlx-model> --model-type lm --no-log-file
 
-# Use default logging (logs/app.log, INFO level)
-mlx-openai-server launch --model-path <path-to-mlx-model> --model-type lm
+# 기본 로깅 사용 (logs/app.log, INFO 레벨)
+python -m app.main launch --model-path <path-to-mlx-model> --model-type lm
 
-# With parser configuration for tool calls and reasoning
-mlx-openai-server launch \
+# 도구 호출 및 추론을 위한 파서 구성 포함
+python -m app.main launch \
   --model-path <path-to-mlx-model> \
   --model-type lm \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3 \
   --reasoning-parser qwen3
 
-# With trust_remote_code enabled (for models requiring custom code)
-mlx-openai-server launch \
+# trust_remote_code 활성화 (사용자 정의 코드가 필요한 모델용)
+python -m app.main launch \
   --model-path <path-to-mlx-model> \
   --model-type lm \
   --trust-remote-code
 
-# With custom chat template file
-mlx-openai-server launch \
+# 사용자 정의 채팅 템플릿 파일 사용
+python -m app.main launch \
   --model-path <path-to-mlx-model> \
   --model-type lm \
   --chat-template-file /path/to/custom_template.jinja
 
-# Using python -m app.main (alternative method)
+# python -m app.main 사용 (대체 방법)
 python -m app.main --model-path <path-to-mlx-model> --model-type lm --no-log-file
 python -m app.main --model-path <path-to-mlx-model> --model-type lm --log-file /tmp/custom.log
 python -m app.main --model-path <path-to-mlx-model> --model-type lm --trust-remote-code
 python -m app.main --model-path <path-to-mlx-model> --model-type lm --chat-template-file /path/to/custom_template.jinja
 ```
 
-> **Note:** Text embeddings via the `/v1/embeddings` endpoint are now available with both text-only models (`--model-type lm`) and multimodal models (`--model-type multimodal`).
+> **참고:** 이제 텍스트 전용 모델(`--model-type lm`)과 멀티모달 모델(`--model-type multimodal`) 모두에서 `/v1/embeddings` 엔드포인트를 통한 텍스트 임베딩을 사용할 수 있습니다.
 
-### Logging Configuration
+### 로깅 구성 (Logging Configuration)
 
-The server provides flexible logging options to help you monitor and debug your MLX server:
+서버는 MLX 서버를 모니터링하고 디버깅하는 데 도움이 되는 유연한 로깅 옵션을 제공합니다:
 
-#### Logging Options
+#### 로깅 옵션
 
-- **`--log-file`**: Specify a custom path for log files
-  - Default: `logs/app.log`
-  - Example: `--log-file /tmp/my-server.log`
+- **`--log-file`**: 로그 파일의 사용자 정의 경로를 지정합니다.
+  - 기본값: `logs/app.log`
+  - 예: `--log-file /tmp/my-server.log`
 
-- **`--no-log-file`**: Disable file logging entirely
-  - Only console output will be shown
-  - Useful for development or when you don't need persistent logs
+- **`--no-log-file`**: 파일 로깅을 완전히 비활성화합니다.
+  - 콘솔 출력만 표시됩니다.
+  - 개발 중이거나 영구 로그가 필요하지 않을 때 유용합니다.
 
-- **`--log-level`**: Control the verbosity of logging
-  - Choices: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
-  - Default: `INFO`
-  - `DEBUG`: Most verbose, includes detailed debugging information
-  - `INFO`: Standard operational messages (default)
-  - `WARNING`: Important notices about potential issues
-  - `ERROR`: Error messages only
-  - `CRITICAL`: Only critical system errors
+- **`--log-level`**: 로깅의 상세도를 제어합니다.
+  - 선택 사항: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+  - 기본값: `INFO`
+  - `DEBUG`: 가장 상세하며 상세한 디버깅 정보를 포함합니다.
+  - `INFO`: 표준 작동 메시지 (기본값)
+  - `WARNING`: 잠재적인 문제에 대한 중요 알림
+  - `ERROR`: 오류 메시지만 표시
+  - `CRITICAL`: 치명적인 시스템 오류만 표시
 
-#### Logging Examples
+#### 로깅 예시
 
 ```bash
-# Use default logging (logs/app.log, INFO level)
-mlx-openai-server launch --model-path <path-to-model> --model-type lm
+# 기본 로깅 사용 (logs/app.log, INFO 레벨)
+python -m app.main launch --model-path <path-to-model> --model-type lm
 
-# Custom log file with debug level
-mlx-openai-server launch --model-path <path-to-model> --model-type lm --log-file /tmp/debug.log --log-level DEBUG
+# 디버그 레벨로 사용자 정의 로그 파일 사용
+python -m app.main launch --model-path <path-to-model> --model-type lm --log-file /tmp/debug.log --log-level DEBUG
 
-# Console-only logging (no file output)
-mlx-openai-server launch --model-path <path-to-model> --model-type lm --no-log-file
+# 콘솔 전용 로깅 (파일 출력 없음)
+python -m app.main launch --model-path <path-to-model> --model-type lm --no-log-file
 
-# High-level logging (errors only)
-mlx-openai-server launch --model-path <path-to-model> --model-type lm --log-level ERROR
+# 고수준 로깅 (오류만)
+python -m app.main launch --model-path <path-to-model> --model-type lm --log-level ERROR
 
-# Using python -m app.main with logging options
+# 로깅 옵션과 함께 python -m app.main 사용
 python -m app.main --model-path <path-to-model> --model-type lm --no-log-file
 python -m app.main --model-path <path-to-model> --model-type lm --log-file /tmp/custom.log --log-level DEBUG
 ```
 
-#### Log File Features
+#### 로그 파일 기능
 
-- **Automatic rotation**: Log files are automatically rotated when they reach 500 MB
-- **Retention**: Log files are kept for 10 days by default
-- **Formatted output**: Both console and file logs include timestamps, log levels, and structured formatting
-- **Colorized console**: Console output includes color coding for better readability
+- **자동 회전**: 로그 파일은 500MB에 도달하면 자동으로 회전됩니다.
+- **보존**: 로그 파일은 기본적으로 10일 동안 보관됩니다.
+- **서식 있는 출력**: 콘솔 및 파일 로그 모두 타임스탬프, 로그 수준 및 구조화된 형식을 포함합니다.
+- **색상화된 콘솔**: 콘솔 출력에는 가독성을 높이기 위해 색상 코딩이 포함됩니다.
 
-### Using the API
+### API 사용 (Using the API)
 
-The server provides OpenAI-compatible endpoints that you can use with standard OpenAI client libraries. Here are some examples:
+서버는 표준 OpenAI 클라이언트 라이브러리와 함께 사용할 수 있는 OpenAI 호환 엔드포인트를 제공합니다. 다음은 몇 가지 예입니다:
 
-#### Text Completion
+#### 텍스트 완성 (Text Completion)
 ```python
 import openai
 
 client = openai.OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"  # API key is not required for local server
+    api_key="not-needed"  # 로컬 서버에는 API 키가 필요하지 않습니다
 )
 
 response = client.chat.completions.create(
-    model="local-model",  # Model name doesn't matter for local server
+    model="local-model",  # 로컬 서버의 경우 모델 이름은 중요하지 않습니다
     messages=[
         {"role": "user", "content": "What is the capital of France?"}
     ],
@@ -809,7 +723,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-#### Multimodal Model (Vision + Audio)
+#### 멀티모달 모델 (비전 + 오디오)
 ```python
 import openai
 import base64
@@ -819,12 +733,12 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Load and encode image
+# 이미지 로드 및 인코딩
 with open("image.jpg", "rb") as image_file:
     base64_image = base64.b64encode(image_file.read()).decode('utf-8')
 
 response = client.chat.completions.create(
-    model="local-multimodal",  # Model name doesn't matter for local server
+    model="local-multimodal",  # 로컬 서버의 경우 모델 이름은 중요하지 않습니다
     messages=[
         {
             "role": "user",
@@ -843,7 +757,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-#### Audio Input Support
+#### 오디오 입력 지원
 ```python
 import openai
 import base64
@@ -853,12 +767,12 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Load and encode audio file
+# 오디오 파일 로드 및 인코딩
 with open("audio.wav", "rb") as audio_file:
     audio_base64 = base64.b64encode(audio_file.read()).decode('utf-8')
 
 response = client.chat.completions.create(
-    model="local-multimodal",  # Model name doesn't matter for local server
+    model="local-multimodal",  # 로컬 서버의 경우 모델 이름은 중요하지 않습니다
     messages=[
         {
             "role": "user",
@@ -882,7 +796,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-#### Advanced Image Generation with Flux-Series Models
+#### Flux 시리즈 모델을 사용한 고급 이미지 생성
 
 ```python
 import openai
@@ -895,7 +809,7 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Basic image generation
+# 기본 이미지 생성
 response = client.images.generate(
     prompt="A serene landscape with mountains and a lake at sunset",
     model="local-image-generation-model",
@@ -903,17 +817,17 @@ response = client.images.generate(
     n=1
 )
 
-# Display the generated image
+# 생성된 이미지 표시
 image_data = base64.b64decode(response.data[0].b64_json)
 image = Image.open(BytesIO(image_data))
 image.show()
 ```
 
-#### Advanced Image Generation with Custom Parameters
+#### 사용자 정의 매개변수를 사용한 고급 이미지 생성
 ```python
 import requests
 
-# For more control, use direct API calls
+# 더 많은 제어를 위해 직접 API 호출 사용
 payload = {
     "prompt": "A beautiful cyberpunk city at night with neon lights",
     "model": "local-image-generation-model",
@@ -932,25 +846,25 @@ response = requests.post(
 
 if response.status_code == 200:
     result = response.json()
-    # Handle the base64 image data
+    # base64 이미지 데이터 처리
     image_data = base64.b64decode(result['data'][0]['b64_json'])
     image = Image.open(BytesIO(image_data))
     image.show()
 ```
 
-**Image Generation Parameters:**
-- `prompt`: Text description of the desired image (required, max 1000 characters)
-- `model`: Model identifier (defaults to "local-image-generation-model")
-- `size`: Image dimensions - "256x256", "512x512", or "1024x1024" (default: "1024x1024")
-- `negative_prompt`: What to avoid in the generated image (optional)
-- `steps`: Number of inference steps, 1-50 (default varies by config: 4 for Schnell, 25 for Dev, 28 for Krea-Dev, 50 for Qwen Image)
-- `seed`: Random seed for reproducible generation (optional)
-- `priority`: Task priority - "low", "normal", "high" (default: "normal")
-- `async_mode`: Whether to process asynchronously (default: false)
+**이미지 생성 매개변수:**
+- `prompt`: 원하는 이미지에 대한 텍스트 설명 (필수, 최대 1000자)
+- `model`: 모델 식별자 (기본값 "local-image-generation-model")
+- `size`: 이미지 크기 - "256x256", "512x512" 또는 "1024x1024" (기본값: "1024x1024")
+- `negative_prompt`: 생성된 이미지에서 피해야 할 것 (선택 사항)
+- `steps`: 추론 단계 수, 1-50 (구성에 따라 기본값 다름: Schnell의 경우 4, Dev의 경우 25, Krea-Dev의 경우 28, Qwen Image의 경우 50)
+- `seed`: 재현 가능한 생성을 위한 랜덤 시드 (선택 사항)
+- `priority`: 작업 우선순위 - "low", "normal", "high" (기본값: "normal")
+- `async_mode`: 비동기적으로 처리할지 여부 (기본값: false)
 
-> **Note:** Image generation requires running the server with `--model-type image-generation`. The server supports MLX Flux-series models (flux-schnell, flux-dev, flux-krea-dev), Qwen Image models (qwen-image), Z-Image Turbo (z-image-turbo), and Fibo (fibo) models for high-quality image generation with configurable quality/speed trade-offs.
+> **참고:** 이미지 생성은 `--model-type image-generation`으로 서버를 실행해야 합니다. 서버는 MLX Flux 시리즈 모델(flux-schnell, flux-dev, flux-krea-dev), Qwen Image 모델(qwen-image), Z-Image Turbo(z-image-turbo), Fibo(fibo) 모델을 지원하여 구성 가능한 품질/속도 균형을 갖춘 고품질 이미지 생성을 제공합니다.
 
-#### Image Editing with Flux-Series Models
+#### Flux 시리즈 모델을 사용한 이미지 편집
 
 ```python
 import openai
@@ -963,7 +877,7 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Edit an existing image
+# 기존 이미지 편집
 with open("images/china.png", "rb") as image_file:
     result = client.images.edit(
         image=image_file,
@@ -971,17 +885,17 @@ with open("images/china.png", "rb") as image_file:
         model="flux-kontext-dev"
     )
 
-# Display the edited image
+# 편집된 이미지 표시
 image_data = base64.b64decode(result.data[0].b64_json)
 image = Image.open(BytesIO(image_data))
 image.show()
 ```
 
-#### Advanced Image Editing with Custom Parameters
+#### 사용자 정의 매개변수를 사용한 고급 이미지 편집
 ```python
 import requests
 
-# For more control, use direct API calls with form data
+# 더 많은 제어를 위해 양식 데이터와 함께 직접 API 호출 사용
 with open("images/china.png", "rb") as image_file:
     files = {"image": image_file}
     data = {
@@ -1004,26 +918,26 @@ with open("images/china.png", "rb") as image_file:
 
 if response.status_code == 200:
     result = response.json()
-    # Handle the base64 image data
+    # base64 이미지 데이터 처리
     image_data = base64.b64decode(result['data'][0]['b64_json'])
     image = Image.open(BytesIO(image_data))
     image.show()
 ```
 
-**Image Edit Parameters:**
-- `image`: The image file to edit (required, PNG, JPEG, or JPG format, max 10MB)
-- `prompt`: Text description of the desired edit (required, max 1000 characters)
-- `model`: Model identifier (defaults to "flux-kontext-dev")
-- `negative_prompt`: What to avoid in the edited image (optional)
-- `guidance_scale`: Controls how closely the model follows the prompt (default: 2.5 for flux-kontext-dev, 4.0 for qwen-image-edit)
-- `steps`: Number of inference steps, 1-50 (default: 4 for flux-kontext-dev, 50 for qwen-image-edit)
-- `seed`: Random seed for reproducible editing (default: 42)
-- `size`: Output image dimensions - "256x256", "512x512", or "1024x1024" (optional)
-- `response_format`: Response format - "b64_json" (default: "b64_json")
+**이미지 편집 매개변수:**
+- `image`: 편집할 이미지 파일 (필수, PNG, JPEG 또는 JPG 형식, 최대 10MB)
+- `prompt`: 원하는 편집에 대한 텍스트 설명 (필수, 최대 1000자)
+- `model`: 모델 식별자 (기본값 "flux-kontext-dev")
+- `negative_prompt`: 편집된 이미지에서 피해야 할 것 (선택 사항)
+- `guidance_scale`: 모델이 프롬프트를 얼마나 가깝게 따를지 제어 (기본값: flux-kontext-dev의 경우 2.5, qwen-image-edit의 경우 4.0)
+- `steps`: 추론 단계 수, 1-50 (기본값: flux-kontext-dev의 경우 4, qwen-image-edit의 경우 50)
+- `seed`: 재현 가능한 편집을 위한 랜덤 시드 (기본값: 42)
+- `size`: 출력 이미지 크기 - "256x256", "512x512" 또는 "1024x1024" (선택 사항)
+- `response_format`: 응답 형식 - "b64_json" (기본값: "b64_json")
 
-> **Note:** Image editing requires running the server with `--model-type image-edit`. The server supports MLX Flux-series models (flux-kontext-dev) and Qwen Image Edit models (qwen-image-edit) for high-quality image editing with configurable quality/speed trade-offs.
+> **참고:** 이미지 편집은 `--model-type image-edit`으로 서버를 실행해야 합니다. 서버는 MLX Flux 시리즈 모델(flux-kontext-dev) 및 Qwen Image Edit 모델(qwen-image-edit)을 지원하여 구성 가능한 품질/속도 균형을 갖춘 고품질 이미지 편집을 제공합니다.
 
-#### Function Calling
+#### 함수 호출 (Function Calling)
 ```python
 import openai
 
@@ -1032,7 +946,7 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Define the messages and tools
+# 메시지 및 도구 정의
 messages = [
     {
         "role": "user",
@@ -1056,7 +970,7 @@ tools = [
     }
 ]
 
-# Make the API call
+# API 호출 수행
 completion = client.chat.completions.create(
     model="local-model",
     messages=messages,
@@ -1064,17 +978,17 @@ completion = client.chat.completions.create(
     tool_choice="auto"
 )
 
-# Handle the tool call response
+# 도구 호출 응답 처리
 if completion.choices[0].message.tool_calls:
     tool_call = completion.choices[0].message.tool_calls[0]
     print(f"Function called: {tool_call.function.name}")
     print(f"Arguments: {tool_call.function.arguments}")
     
-    # Process the tool call - typically you would call your actual function here
-    # For this example, we'll just hardcode a weather response
+    # 도구 호출 처리 - 일반적으로 여기에서 실제 함수를 호출합니다
+    # 이 예제에서는 날씨 응답을 하드코딩합니다
     weather_info = {"temperature": "22°C", "conditions": "Sunny", "humidity": "65%"}
     
-    # Add the tool call and function response to the conversation
+    # 대화에 도구 호출 및 함수 응답 추가
     messages.append(completion.choices[0].message)
     messages.append({
         "role": "tool",
@@ -1083,7 +997,7 @@ if completion.choices[0].message.tool_calls:
         "content": str(weather_info)
     })
     
-    # Continue the conversation with the function result
+    # 함수 결과를 사용하여 대화 계속
     final_response = client.chat.completions.create(
         model="local-model",
         messages=messages
@@ -1092,9 +1006,9 @@ if completion.choices[0].message.tool_calls:
     print(final_response.choices[0].message.content)
 ```
 
-#### Structured Outputs with JSON Schema
+#### JSON 스키마를 이용한 구조화된 출력 (Structured Outputs with JSON Schema)
 
-The server supports structured outputs using JSON schema, allowing you to get responses in specific JSON formats:
+서버는 JSON 스키마를 사용한 구조화된 출력을 지원하므로 특정 JSON 형식의 응답을 얻을 수 있습니다:
 
 ```python
 import openai
@@ -1105,7 +1019,7 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Define the messages and response format
+# 메시지 및 응답 형식 정의
 messages = [
     {
         "role": "system",
@@ -1146,27 +1060,27 @@ response_format = {
     }
 }
 
-# Make the API call with structured output
+# 구조화된 출력으로 API 호출 수행
 completion = client.chat.completions.create(
     model="local-model",
     messages=messages,
     response_format=response_format
 )
 
-# Parse the structured response
+# 구조화된 응답 파싱
 response_content = completion.choices[0].message.content
 parsed_address = json.loads(response_content)
 print("Structured Address:")
 print(json.dumps(parsed_address, indent=2))
 ```
 
-**Response Format Parameters:**
-- `type`: Must be set to `"json_schema"` for structured outputs
-- `json_schema`: A JSON schema object defining the expected response structure
-  - `name`: Optional name for the schema
-  - `schema`: The actual JSON schema definition with properties, types, and requirements
+**응답 형식 매개변수:**
+- `type`: 구조화된 출력의 경우 `"json_schema"`로 설정해야 합니다.
+- `json_schema`: 예상되는 응답 구조를 정의하는 JSON 스키마 객체
+  - `name`: 스키마의 선택적 이름
+  - `schema`: 속성, 유형 및 요구 사항이 포함된 실제 JSON 스키마 정의
 
-**Example Response:**
+**응답 예:**
 ```json
 {
   "address": {
@@ -1178,11 +1092,11 @@ print(json.dumps(parsed_address, indent=2))
 }
 ```
 
-> **Note:** Structured outputs work with text-only models (`--model-type lm`). The model will attempt to format its response according to the provided JSON schema.
+> **참고:** 구조화된 출력은 텍스트 전용 모델(`--model-type lm`)에서 작동합니다. 모델은 제공된 JSON 스키마에 따라 응답 형식을 지정하려고 시도합니다.
 
-#### Embeddings
+#### 임베딩 (Embeddings)
 
-1. Text-only model embeddings:
+1. 텍스트 전용 모델 임베딩:
 ```python
 import openai
 
@@ -1191,14 +1105,14 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Generate embeddings for a single text
+# 단일 텍스트에 대한 임베딩 생성
 embedding_response = client.embeddings.create(
     model="mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-MLX-Q8",
     input=["The quick brown fox jumps over the lazy dog"]
 )
 print(f"Embedding dimension: {len(embedding_response.data[0].embedding)}")
 
-# Generate embeddings for multiple texts
+# 여러 텍스트에 대한 임베딩 생성
 batch_response = client.embeddings.create(
     model="mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-MLX-Q8",
     input=[
@@ -1210,7 +1124,7 @@ batch_response = client.embeddings.create(
 print(f"Number of embeddings: {len(batch_response.data)}")
 ```
 
-2. Multimodal model embeddings:
+2. 멀티모달 모델 임베딩:
 ```python
 import openai
 import base64
@@ -1222,7 +1136,7 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
-# Helper function to encode images as base64
+# 이미지를 base64로 인코딩하는 헬퍼 함수
 def image_to_base64(image_path):
     image = Image.open(image_path)
     buffer = BytesIO()
@@ -1232,10 +1146,10 @@ def image_to_base64(image_path):
     image_base64 = base64.b64encode(image_data).decode('utf-8')
     return f"data:image/png;base64,{image_base64}"
 
-# Encode the image
+# 이미지 인코딩
 image_uri = image_to_base64("images/attention.png")
 
-# Generate embeddings for text+image
+# 텍스트+이미지에 대한 임베딩 생성
 multimodal_embedding = client.embeddings.create(
     model="mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
     input=["Describe the image in detail"],
@@ -1244,45 +1158,45 @@ multimodal_embedding = client.embeddings.create(
 print(f"Multimodal embedding dimension: {len(multimodal_embedding.data[0].embedding)}")
 ```
 
-> **Note:** Replace the model name and image path as needed. The `extra_body` parameter is used to pass the image data URI to the API.
+> **참고:** 필요에 따라 모델 이름과 이미지 경로를 바꾸세요. `extra_body` 매개변수는 이미지 데이터 URI를 API에 전달하는 데 사용됩니다.
 
-> **Warning:** Make sure you're running the server with `--model-type vlm` when making multimodal requests (with images or audio). If you send a multimodal request to a server running with `--model-type lm` (text-only model), you'll receive a 400 error with a message that multimodal requests are not supported with text-only models.
+> **경고:** 멀티모달 요청(이미지 또는 오디오 포함)을 할 때는 서버가 `--model-type multimodal`로 실행되고 있는지 확인하세요. `--model-type lm`(텍스트 전용 모델)으로 실행되는 서버에 멀티모달 요청을 보내면 멀티모달 요청이 지원되지 않는다는 400 오류 메시지를 받게 됩니다.
 
-## Request Queue System
+## 요청 대기열 시스템 (Request Queue System)
 
-The server implements a robust request queue system to manage and optimize MLX model inference requests. This system ensures efficient resource utilization and fair request processing.
+서버는 MLX 모델 추론 요청을 관리하고 최적화하기 위해 강력한 요청 대기열 시스템을 구현합니다. 이 시스템은 효율적인 리소스 활용과 공정한 요청 처리를 보장합니다.
 
-### Key Features
+### 주요 기능
 
-- **Concurrency Control**: Limits the number of simultaneous model inferences to prevent resource exhaustion
-- **Request Queuing**: Implements a fair, first-come-first-served queue for pending requests
-- **Timeout Management**: Automatically handles requests that exceed the configured timeout
-- **Real-time Monitoring**: Provides endpoints to monitor queue status and performance metrics
+- **동시성 제어**: 리소스 고갈을 방지하기 위해 동시 모델 추론 수를 제한합니다.
+- **요청 대기열**: 보류 중인 요청에 대해 공정한 선착순 대기열을 구현합니다.
+- **시간 초과 관리**: 구성된 시간 초과를 초과하는 요청을 자동으로 처리합니다.
+- **실시간 모니터링**: 대기열 상태 및 성능 메트릭을 모니터링하는 엔드포인트를 제공합니다.
 
-### Architecture
+### 아키텍처
 
-The queue system consists of two main components:
+대기열 시스템은 두 가지 주요 구성 요소로 구성됩니다:
 
-1. **RequestQueue**: An asynchronous queue implementation that:
-   - Manages pending requests with configurable queue size
-   - Controls concurrent execution using semaphores
-   - Handles timeouts and errors gracefully
-   - Provides real-time queue statistics
+1. **RequestQueue**: 다음을 수행하는 비동기 대기열 구현체입니다:
+   - 구성 가능한 대기열 크기로 보류 중인 요청 관리
+   - 세마포어를 사용하여 동시 실행 제어
+   - 시간 초과 및 오류를 우아하게 처리
+   - 실시간 대기열 통계 제공
 
-2. **Model Handlers**: Specialized handlers for different model types:
-   - `MLXLMHandler`: Manages text-only model requests
-   - `MLXVLMHandler`: Manages multimodal model requests
-   - `MLXFluxHandler`: Manages Flux-series image generation requests
+2. **모델 핸들러**: 다양한 모델 유형에 대한 특수 핸들러:
+   - `MLXLMHandler`: 텍스트 전용 모델 요청 관리
+   - `MLXVLMHandler`: 멀티모달 모델 요청 관리
+   - `MLXFluxHandler`: Flux 시리즈 이미지 생성 요청 관리
 
-### Queue Monitoring
+### 대기열 모니터링
 
-Monitor queue statistics using the `/v1/queue/stats` endpoint:
+`/v1/queue/stats` 엔드포인트를 사용하여 대기열 통계를 모니터링합니다:
 
 ```bash
 curl http://localhost:8000/v1/queue/stats
 ```
 
-Example response:
+응답 예:
 ```json
 {
   "status": "ok",
@@ -1296,34 +1210,34 @@ Example response:
 }
 ```
 
-### Error Handling
+### 오류 처리
 
-The queue system handles various error conditions:
+대기열 시스템은 다양한 오류 조건을 처리합니다:
 
-1. **Queue Full (429)**: When the queue reaches its maximum size
+1. **대기열 가득 참 (429)**: 대기열이 최대 크기에 도달했을 때
 ```json
 {
   "detail": "Too many requests. Service is at capacity."
 }
 ```
 
-2. **Request Timeout**: When a request exceeds the configured timeout
+2. **요청 시간 초과**: 요청이 구성된 시간 초과를 초과했을 때
 ```json
 {
   "detail": "Request processing timed out after 300 seconds"
 }
 ```
 
-3. **Model Errors**: When the model encounters an error during inference
+3. **모델 오류**: 모델이 추론 중에 오류를 발생시켰을 때
 ```json
 {
   "detail": "Failed to generate response: <error message>"
 }
 ```
 
-### Streaming Responses
+### 스트리밍 응답
 
-The server supports streaming responses with proper chunk formatting:
+서버는 적절한 청크 형식으로 스트리밍 응답을 지원합니다:
 ```python
 {
     "id": "chatcmpl-1234567890",
@@ -1338,11 +1252,11 @@ The server supports streaming responses with proper chunk formatting:
 }
 ```
 
-## API Response Schemas
+## API 응답 스키마 (API Response Schemas)
 
-The server implements OpenAI-compatible API response schemas to ensure seamless integration with existing applications. Below are the key response formats:
+서버는 기존 애플리케이션과의 원활한 통합을 보장하기 위해 OpenAI 호환 API 응답 스키마를 구현합니다. 다음은 주요 응답 형식입니다:
 
-### Chat Completions Response
+### 채팅 완성 응답 (Chat Completions Response)
 
 ```json
 {
@@ -1368,7 +1282,7 @@ The server implements OpenAI-compatible API response schemas to ensure seamless 
 }
 ```
 
-### Embeddings Response
+### 임베딩 응답 (Embeddings Response)
 
 ```json
 {
@@ -1388,7 +1302,7 @@ The server implements OpenAI-compatible API response schemas to ensure seamless 
 }
 ```
 
-### Function/Tool Calling Response
+### 함수/도구 호출 응답 (Function/Tool Calling Response)
 
 ```json
 {
@@ -1424,7 +1338,7 @@ The server implements OpenAI-compatible API response schemas to ensure seamless 
 }
 ```
 
-### Image Generation Response
+### 이미지 생성 응답 (Image Generation Response)
 
 ```json
 {
@@ -1438,7 +1352,7 @@ The server implements OpenAI-compatible API response schemas to ensure seamless 
 }
 ```
 
-### Error Response
+### 오류 응답 (Error Response)
 
 ```json
 {
@@ -1451,367 +1365,97 @@ The server implements OpenAI-compatible API response schemas to ensure seamless 
 }
 ```
 
-## Example Notebooks
+## 예제 노트북 (Example Notebooks)
 
-The repository includes example notebooks to help you get started with different aspects of the API:
+이 저장소에는 API의 다양한 측면을 시작하는 데 도움이 되는 예제 노트북이 포함되어 있습니다:
 
-- **function_calling_examples.ipynb**: A practical guide to implementing and using function calling with local models, including:
-  - Setting up function definitions
-  - Making function calling requests
-  - Handling function call responses
-  - Working with streaming function calls
-  - Building multi-turn conversations with tool use
+- **function_calling_examples.ipynb**: 로컬 모델에서 함수 호출을 구현하고 사용하는 방법에 대한 실용 가이드:
+  - 함수 정의 설정
+  - 함수 호출 요청 수행
+  - 함수 호출 응답 처리
+  - 스트리밍 함수 호출 작업
+  - 도구 사용을 통한 다중 턴 대화 구축
 
-- **structured_outputs_examples.ipynb**: A comprehensive guide to using structured outputs with JSON schema, including:
-  - Setting up JSON schema definitions
-  - Making requests with response format specifications
-  - Parsing structured responses
-  - Working with complex nested schemas
-  - Building data extraction pipelines with structured outputs
+- **structured_outputs_examples.ipynb**: JSON 스키마를 사용하여 구조화된 출력을 사용하는 방법에 대한 포괄적인 가이드:
+  - JSON 스키마 정의 설정
+  - 응답 형식 사양으로 요청 수행
+  - 구조화된 응답 파싱
+  - 복잡한 중첩 스키마 작업
+  - 구조화된 출력을 사용한 데이터 추출 파이프라인 구축
 
-- **vision_examples.ipynb**: A comprehensive guide to using the vision capabilities of the API, including:
-  - Processing image inputs in various formats
-  - Vision analysis and object detection
-  - Multi-turn conversations with images
-  - Using vision models for detailed image description and analysis
+- **vision_examples.ipynb**: API의 비전 기능을 사용하는 방법에 대한 포괄적인 가이드:
+  - 다양한 형식의 이미지 입력 처리
+  - 비전 분석 및 객체 감지
+  - 이미지가 포함된 다중 턴 대화
+  - 상세한 이미지 설명 및 분석을 위한 비전 모델 사용
 
-- **lm_embeddings_examples.ipynb**: A comprehensive guide to using the embeddings API for text-only models, including:
-  - Generating embeddings for single and batch inputs
-  - Computing semantic similarity between texts
-  - Building a simple vector-based search system
-  - Comparing semantic relationships between concepts
+- **lm_embeddings_examples.ipynb**: 텍스트 전용 모델을 위한 임베딩 API 사용에 대한 포괄적인 가이드:
+  - 단일 및 배치 입력에 대한 임베딩 생성
+  - 텍스트 간 의미적 유사성 계산
+  - 간단한 벡터 기반 검색 시스템 구축
+  - 개념 간의 의미적 관계 비교
 
-- **vlm_embeddings_examples.ipynb**: A detailed guide to working with Vision-Language Model embeddings, including:
-  - Generating embeddings for images with text prompts
-  - Creating text-only embeddings with VLMs
-  - Calculating similarity between text and image representations
-  - Understanding the shared embedding space of multimodal models
-  - Practical applications of VLM embeddings
+- **vlm_embeddings_examples.ipynb**: Vision-Language Model 임베딩 작업에 대한 상세 가이드:
+  - 텍스트 프롬프트로 이미지에 대한 임베딩 생성
+  - VLM으로 텍스트 전용 임베딩 생성
+  - 텍스트와 이미지 표현 간의 유사성 계산
+  - 멀티모달 모델의 공유 임베딩 공간 이해
+  - VLM 임베딩의 실제 적용
 
-- **simple_rag_demo.ipynb**: A practical guide to building a lightweight Retrieval-Augmented Generation (RAG) pipeline over PDF documents using local MLX Server, including:
-  - Reading and chunking PDF documents  
-  - Generating text embeddings via MLX Server  
-  - Creating a simple vector store for retrieval  
-  - Performing question answering based on relevant chunks
-  - End-to-end demonstration of document QA using Qwen3 local model
+- **simple_rag_demo.ipynb**: 로컬 MLX 서버를 사용하여 PDF 문서에 대한 경량 RAG(Retrieval-Augmented Generation) 파이프라인을 구축하는 실용 가이드:
+  - PDF 문서 읽기 및 청킹
+  - MLX 서버를 통한 텍스트 임베딩 생성
+  - 검색을 위한 간단한 벡터 저장소 생성
+  - 관련 청크를 기반으로 한 질문 답변 수행
+  - Qwen3 로컬 모델을 사용한 문서 QA의 종단 간 데모
   <p align="center">
     <a href="https://youtu.be/ANUEZkmR-0s">
       <img src="https://img.youtube.com/vi/ANUEZkmR-0s/0.jpg" alt="RAG Demo" width="600">
     </a>
   </p>
 
-- **audio_examples.ipynb**: A comprehensive guide to audio processing capabilities with MLX Server, including:
-  - Setting up connection to MLX Server for audio processing
-  - Loading and encoding audio files for API transmission
-  - Sending audio input to multimodal models for analysis
-  - Combining audio with text prompts for rich, context-aware responses
-  - Exploring different types of audio analysis prompts
-  - Understanding audio transcription and content analysis capabilities
+- **audio_examples.ipynb**: MLX 서버의 오디오 처리 기능에 대한 포괄적인 가이드:
+  - 오디오 처리를 위한 MLX 서버 연결 설정
+  - API 전송을 위한 오디오 파일 로드 및 인코딩
+  - 분석을 위해 멀티모달 모델에 오디오 입력 전송
+  - 풍부하고 문맥을 인식하는 응답을 위해 오디오와 텍스트 프롬프트 결합
+  - 다양한 유형의 오디오 분석 프롬프트 탐색
+  - 오디오 전사 및 콘텐츠 분석 기능 이해
 
-- **image_generations.ipynb**: A comprehensive guide to image generation using MLX Flux-series and Qwen Image models, including:
-  - Setting up connection to MLX Server for image generation
-  - Basic image generation with default parameters
-  - Advanced image generation with custom parameters (negative prompts, steps, seed)
-  - Working with different Flux configurations (schnell, dev, Krea-dev) and Qwen Image models
-  - Using LoRA adapters for fine-tuned generation
-  - Optimizing performance with quantization settings
+- **image_generations.ipynb**: MLX Flux 시리즈 및 Qwen Image 모델을 사용한 이미지 생성에 대한 포괄적인 가이드:
+  - 이미지 생성을 위한 MLX 서버 연결 설정
+  - 기본 매개변수를 사용한 기본 이미지 생성
+  - 사용자 정의 매개변수(네거티브 프롬프트, 단계, 시드)를 사용한 고급 이미지 생성
+  - 다양한 Flux 구성(schnell, dev, Krea-dev) 및 Qwen Image 모델 작업
+  - 미세 조정된 생성을 위한 LoRA 어댑터 사용
+  - 양자화 설정으로 성능 최적화
 
-- **image_edit.ipynb**: A comprehensive guide to image editing using MLX Flux-series and Qwen Image Edit models, including:
-  - Setting up connection to MLX Server for image editing
-  - Basic image editing with default parameters
-  - Advanced image editing with custom parameters (guidance scale, steps, seed)
-  - Working with the flux-kontext-dev and qwen-image-edit configurations for contextual editing
-  - Using LoRA adapters for fine-tuned editing
-  - Understanding the differences between generation and editing workflows
-  - Best practices for effective image editing prompts
+- **image_edit.ipynb**: MLX Flux 시리즈 및 Qwen Image Edit 모델을 사용한 이미지 편집에 대한 포괄적인 가이드:
+  - 이미지 편집을 위한 MLX 서버 연결 설정
+  - 기본 매개변수를 사용한 기본 이미지 편집
+  - 사용자 정의 매개변수(가이던스 스케일, 단계, 시드)를 사용한 고급 이미지 편집
+  - 문맥 편집을 위한 flux-kontext-dev 및 qwen-image-edit 구성 작업
+  - 미세 조정된 편집을 위한 LoRA 어댑터 사용
+  - 생성 및 편집 워크플로우 간의 차이점 이해
+  - 효과적인 이미지 편집 프롬프트를 위한 모범 사례
 
-## Community & Support
-
-We're thrilled by the incredible community that has grown around this project! Join thousands of developers, researchers, and AI enthusiasts who are building the future of local AI with MLX.
-
-### 🌟 Show Your Support
-
-**Star this repository** if you find it useful! Your stars help:
-- 📈 **Increase visibility** and help other developers discover this tool
-- 🚀 **Motivate continued development** and new features
-- 🤝 **Build community recognition** for the MLX ecosystem
-
-[![GitHub stars](https://img.shields.io/github/stars/cubist38/mlx-openai-server?style=social&label=Star)](https://github.com/cubist38/mlx-openai-server)
-[![GitHub forks](https://img.shields.io/github/forks/cubist38/mlx-openai-server?style=social&label=Fork)](https://github.com/cubist38/mlx-openai-server/fork)
-[![GitHub issues](https://img.shields.io/github/issues/cubist38/mlx-openai-server?color=blue&label=Issues)](https://github.com/cubist38/mlx-openai-server/issues)
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/cubist38/mlx-openai-server?color=green&label=PRs)](https://github.com/cubist38/mlx-openai-server/pulls)
-[![GitHub discussions](https://img.shields.io/github/discussions/cubist38/mlx-openai-server?color=purple&label=Discussions)](https://github.com/cubist38/mlx-openai-server/discussions)
-
-### 🆘 Get Help & Connect
-
-#### 📚 Learning Resources
-- **📖 Documentation**: This README and comprehensive API docs
-- **🎥 Video Tutorials**: 
-  - [Setup & Installation Demo](https://youtu.be/-h-AwPNvKiw)
-  - [RAG Implementation Demo](https://youtu.be/ANUEZkmR-0s)
-- **📓 Example Notebooks**: Check out our `examples/` directory for practical use cases
-- **🔍 Search Issues**: Your question might already be answered!
-
-#### 💬 Community Channels
-- **🗨️ GitHub Discussions**: [Ask questions, share ideas, and connect with users](https://github.com/cubist38/mlx-openai-server/discussions)
-- **🐛 GitHub Issues**: [Report bugs, request features, or get technical help](https://github.com/cubist38/mlx-openai-server/issues)
-- **📢 Community Showcase**: Share your projects and use cases
-
-#### 🚨 Before Asking for Help
-1. **Search existing issues** and discussions
-2. **Check the documentation** and examples
-3. **Watch the video tutorials** for common setup issues
-4. **Provide system details** (macOS version, Python version, model used)
-5. **Include error messages** and logs when reporting issues
-
-### 🤝 Contribute & Give Back
-
-We welcome contributions of all kinds! Here's how you can help:
-
-#### 💻 Code Contributions
-- **🐛 Bug Fixes**: Help squash bugs and improve stability
-- **✨ New Features**: Add capabilities that benefit the community
-- **🔧 Performance**: Optimize code for better speed and efficiency
-- **🧪 Testing**: Improve test coverage and reliability
-
-#### 📚 Documentation & Examples
-- **📖 Documentation**: Improve guides, tutorials, and API docs
-- **📓 Examples**: Share your use cases and example notebooks
-- **🎥 Tutorials**: Create video guides or blog posts
-- **🌐 Translations**: Help translate documentation to other languages
-
-#### 🎯 Community Support
-- **💬 Help Others**: Answer questions in discussions and issues
-- **🔍 Bug Reports**: Report issues with detailed reproduction steps
-- **💡 Feature Requests**: Suggest improvements and new capabilities
-- **⭐ Code Reviews**: Review pull requests and provide feedback
-
-### 📢 Share Your Success
-
-**We love hearing about your projects!** Share how you're using MLX OpenAI Server:
-
-#### 🏆 Success Stories
-- **Research Projects**: Academic papers, experiments, and discoveries
-- **Production Apps**: Real-world applications and services
-- **Open Source Tools**: Libraries and frameworks built on top
-- **Educational Content**: Courses, workshops, and tutorials
-
-#### 📈 Community Impact
-- **Mention us** in your projects, papers, or presentations
-- **Write blog posts** about your experience and use cases
-- **Share on social media** with #MLX #LocalAI #OpenAI
-- **Present at conferences** or meetups about local AI
-
-### 🏗️ Community Highlights
-
-#### 🚀 Active Development
-- **Regular Updates**: New features and improvements every week
-- **Rapid Response**: Quick fixes for critical issues
-- **Community-Driven**: Features prioritized based on user feedback
-- **Open Roadmap**: Transparent development planning
-
-#### 🌍 Growing Ecosystem
-- **MLX Integration**: Deep integration with Apple's MLX framework
-- **Model Support**: Expanding support for new model types
-- **Tool Ecosystem**: Compatible with popular AI tools and frameworks
-- **Community Models**: Support for community-contributed models
-
-#### 💼 Real-World Impact
-- **Research**: Used in academic research and experiments
-- **Startups**: Powering production AI applications
-- **Education**: Teaching local AI development
-- **Open Source**: Contributing to the broader AI ecosystem
-
-#### 🎯 Community Values
-- **Open Source**: MIT licensed and community-driven
-- **Inclusive**: Welcoming to developers of all skill levels
-- **Helpful**: Supportive community focused on helping others succeed
-- **Innovative**: Pushing the boundaries of local AI capabilities
-
-### 🎉 Join the Movement
-
-**You're part of something special!** This project represents the future of local AI development:
-
-- **🔒 Privacy-First**: Run AI models locally without sending data to the cloud
-- **⚡ Performance**: Optimized for Apple Silicon with incredible speed
-- **🌱 Sustainable**: Reduce carbon footprint with local processing
-- **🎯 Accessible**: Make AI development available to everyone
-
-**Your support and contributions make this project better for everyone in the MLX and local AI community!** 🚀
-
----
-
-## Large Models
-When using models that are large relative to your system's available RAM, performance may suffer. mlx-lm tries to improve speed by wiring the memory used by the model and its cache—this optimization is only available on macOS 15.0 or newer.
-If you see the following warning message:
+## 대규모 모델 (Large Models)
+시스템의 사용 가능한 RAM에 비해 큰 모델을 사용하는 경우 성능이 저하될 수 있습니다. mlx-lm은 모델과 캐시에서 사용하는 메모리를 와이어링(wiring)하여 속도를 향상시키려고 시도합니다. 이 최적화는 macOS 15.0 이상에서만 사용할 수 있습니다.
+만약 다음 경고 메시지가 표시된다면:
 > [WARNING] Generating with a model that requires ...
-it means the model may run slowly on your machine. If the model fits in RAM, you can often improve performance by raising the system's wired memory limit. To do this, run:
+모델이 컴퓨터에서 느리게 실행될 수 있음을 의미합니다. 모델이 RAM에 맞는 경우 시스템의 와이어드 메모리 제한을 높여 성능을 향상시킬 수 있습니다. 이렇게 하려면 다음을 실행하세요:
 ```bash
 bash configure_mlx.sh
 ```
+## 라이선스 (License)
+이 프로젝트는 [MIT 라이선스](LICENSE)에 따라 라이선스가 부여됩니다. 라이선스 조건에 따라 자유롭게 사용, 수정 및 배포할 수 있습니다.
 
-## Contributing
+## 🏗️ 핵심 기술
+- **[MLX 팀](https://github.com/ml-explore/mlx)** - Apple Silicon에서 효율적인 기계 학습을 위한 기반을 제공하는 획기적인 MLX 프레임워크 개발
+- **[mlx-lm](https://github.com/ml-explore/mlx-lm)** - 효율적인 대규모 언어 모델 지원 및 최적화
+- **[mlx-vlm](https://github.com/Blaizzy/mlx-vlm/tree/main)** - MLX 생태계 내에서 멀티모달 모델 지원 개척
+- **[mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings)** - 최적화된 메모리 관리를 통한 텍스트 임베딩 생성
+- **[mflux](https://github.com/filipstrand/mflux)** - 고급 구성을 갖춘 Flux 시리즈 이미지 생성 모델
+- **[mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)** - Apple Silicon에서 최적화된 추론을 통한 오디오 전사 및 음성 인식
+- **[mlx-community](https://huggingface.co/mlx-community)** - 다양한 고품질 MLX 모델 컬렉션 큐레이팅 및 유지 관리
 
-We welcome contributions to improve this project! Whether you're fixing bugs, adding features, improving documentation, or sharing examples, your contributions are valuable to the community.
-
-### 🚀 Quick Start
-1. **Fork** the repository to your GitHub account
-2. **Clone** your fork locally:
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/mlx-openai-server.git
-    cd mlx-openai-server
-    ```
-3. **Create** a new branch for your changes:
-    ```bash
-    git checkout -b feature/your-feature-name
-    ```
-4. **Make** your changes and test them thoroughly
-5. **Commit** with clear, descriptive messages:
-    ```bash
-    git commit -m "feat: add new model support"
-    git commit -m "fix: resolve audio processing issue"
-    git commit -m "docs: update installation guide"
-    ```
-6. **Push** to your fork:
-    ```bash
-    git push origin feature/your-feature-name
-    ```
-7. **Open** a pull request with a detailed description
-
-### 📋 Contribution Guidelines
-
-#### Code Contributions
-- Follow existing code style and patterns
-- Add tests for new features when possible
-- Update documentation for API changes
-- Ensure all tests pass before submitting
-
-#### Documentation Improvements
-- Fix typos, grammar, or unclear explanations
-- Add missing examples or use cases
-- Improve code comments and docstrings
-- Update README sections as needed
-
-#### Bug Reports
-- Use the [GitHub issue template](https://github.com/cubist38/mlx-openai-server/issues/new)
-- Include detailed steps to reproduce
-- Provide system information (macOS version, Python version)
-- Share error messages and logs
-
-#### Feature Requests
-- Describe the use case and expected behavior
-- Explain why this feature would be valuable
-- Consider implementation complexity
-- Check if similar features already exist
-
-### 🏷️ Commit Message Convention
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-- `feat:` New features
-- `fix:` Bug fixes
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting, etc.)
-- `refactor:` Code refactoring
-- `test:` Adding or updating tests
-- `chore:` Maintenance tasks
-
-### 🤝 Review Process
-- All contributions require review before merging
-- We aim to review PRs within 48 hours
-- Maintainers may request changes or improvements
-- Once approved, your contribution will be merged
-
-Thank you for contributing to the MLX ecosystem!
-
-## License
-This project is licensed under the [MIT License](LICENSE). You are free to use, modify, and distribute it under the terms of the license.
-
-## Support
-
-Need help with MLX OpenAI Server? We're here to support you! Here are the best ways to get assistance:
-
-### 🆘 Getting Help
-
-#### 📝 Before Asking for Help
-1. **Check the documentation** - This README and example notebooks
-2. **Search existing issues** - Your question might already be answered
-3. **Review the examples** - Check the `examples/` directory for use cases
-4. **Watch the demos** - Our [setup video](https://youtu.be/-h-AwPNvKiw), [RAG demo](https://youtu.be/ANUEZkmR-0s), and [GPT-OSS-20B + Opencode integration](https://youtu.be/MTmR_mPSs6k)
-
-#### 🐛 Reporting Issues
-- **GitHub Issues**: [Create a new issue](https://github.com/cubist38/mlx-openai-server/issues/new) with:
-  - Clear description of the problem
-  - Steps to reproduce
-  - System information (macOS version, Python version)
-  - Error messages and logs
-  - Expected vs actual behavior
-
-#### 💬 Community Support
-- **GitHub Discussions**: [Ask questions and share experiences](https://github.com/cubist38/mlx-openai-server/discussions)
-- **GitHub Issues**: For bug reports and feature requests
-- **Example Notebooks**: Learn from community examples
-
-### 🔧 Common Issues & Solutions
-
-#### Installation Problems
-- **MLX Installation**: Ensure you're on macOS with M-series chip
-- **Python Version**: Use Python 3.11+ for best compatibility
-- **Dependencies**: Run `pip install -r requirements.txt` if needed
-
-#### Model Loading Issues
-- **Memory**: Large models may require more RAM
-- **Model Path**: Verify the model path is correct
-- **Quantization**: Try different quantization levels (4-bit, 8-bit, 16-bit)
-
-#### Performance Issues
-- **Context Length**: Adjust context length for memory optimization
-- **Quantization**: Use lower precision for faster inference
-- **System Resources**: Close other applications to free up memory
-
-### 📚 Additional Resources
-- **MLX Documentation**: [ml-explore/mlx](https://github.com/ml-explore/mlx)
-- **MLX Models**: [mlx-community](https://huggingface.co/mlx-community)
-- **Example Notebooks**: Check the `examples/` directory
-- **Video Tutorials**: Watch our setup, demo, and integration videos
-
-### ⏱️ Response Times
-- **Bug Reports**: We aim to respond within 24-48 hours
-- **Feature Requests**: Reviewed weekly
-- **Community Questions**: Usually answered within a few days
-- **Pull Requests**: Reviewed within 48 hours
-
-Stay tuned for updates and enhancements!
-
-## Acknowledgments
-
-We extend our heartfelt gratitude to the following individuals and organizations whose contributions have been instrumental in making this project possible:
-
-### 🏗️ Core Technologies
-- **[MLX team](https://github.com/ml-explore/mlx)** - For developing the groundbreaking MLX framework, which provides the foundation for efficient machine learning on Apple Silicon
-- **[mlx-lm](https://github.com/ml-explore/mlx-lm)** - For efficient large language models support and optimization
-- **[mlx-vlm](https://github.com/Blaizzy/mlx-vlm/tree/main)** - For pioneering multimodal model support within the MLX ecosystem
-- **[mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings)** - For text embeddings generation with optimized memory management
-- **[mflux](https://github.com/filipstrand/mflux)** - For Flux-series image generation models with advanced configurations
-- **[mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper)** - For audio transcription and speech recognition with optimized inference on Apple Silicon 
-- **[mlx-community](https://huggingface.co/mlx-community)** - For curating and maintaining a diverse collection of high-quality MLX models
-
-### 🤝 Open Source Community
-We deeply appreciate the broader open-source community for their invaluable contributions:
-
-- **Model Developers** - For creating and sharing the models that power this server
-- **Framework Contributors** - For building the tools and libraries that make this possible
-- **Documentation Writers** - For creating comprehensive guides and tutorials
-- **Community Members** - For testing, feedback, and continuous improvement
-
-### 🌟 Community Contributors
-A special acknowledgment to all contributors, users, and supporters who have helped shape this project through their:
-- **Feedback and suggestions** that drive improvements
-- **Bug reports** that help maintain quality
-- **Code contributions** that add new features
-- **Documentation improvements** that help others
-- **Community support** that helps users succeed
-- **Example sharing** that demonstrates real-world applications
-
-### 📈 Growing Together
-Your engagement and contributions help make this project better for everyone in the MLX and local AI community. Together, we're building a more accessible and powerful ecosystem for local AI development.
-
-Thank you for being part of this journey! 🚀
