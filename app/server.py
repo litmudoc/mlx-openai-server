@@ -12,16 +12,16 @@ Key exports:
     ready to run.
 """
 
+from contextlib import asynccontextmanager
 import gc
 import time
-from contextlib import asynccontextmanager
 
-import mlx.core as mx
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
+import mlx.core as mx
+import uvicorn
 
 from .api.endpoints import router
 from .config import MLXServerConfig
@@ -165,7 +165,14 @@ def create_lifespan(config_args: MLXServerConfig):
                     chat_template_file=config_args.chat_template_file,
                 )
             elif config_args.model_type == "image-generation":
-                if config_args.config_name not in ["flux-schnell", "flux-dev", "flux-krea-dev", "qwen-image", "z-image-turbo", "fibo"]:
+                if config_args.config_name not in [
+                    "flux-schnell",
+                    "flux-dev",
+                    "flux-krea-dev",
+                    "qwen-image",
+                    "z-image-turbo",
+                    "fibo",
+                ]:
                     raise ValueError(
                         f"Invalid config name: {config_args.config_name}. Only flux-schnell, flux-dev, flux-krea-dev, qwen-image, z-image-turbo, and fibo are supported for image generation."
                     )
@@ -205,6 +212,7 @@ def create_lifespan(config_args: MLXServerConfig):
                     max_concurrency=config_args.max_concurrency,
                     max_prompt_cache=config_args.max_prompt_cache,
                     cache_min_prefix_length=config_args.cache_min_prefix_length,
+                    cache_min_reuse_ratio=config_args.cache_min_reuse_ratio,
                     enable_auto_tool_choice=config_args.enable_auto_tool_choice,
                     tool_call_parser=config_args.tool_call_parser,
                     reasoning_parser=config_args.reasoning_parser,
@@ -223,7 +231,7 @@ def create_lifespan(config_args: MLXServerConfig):
             app.state.handler = handler
 
         except Exception as e:
-            logger.error(f"Failed to initialize MLX handler: {str(e)}")
+            logger.error(f"Failed to initialize MLX handler: {e!s}")
             raise
 
         # Initial memory cleanup
@@ -241,7 +249,7 @@ def create_lifespan(config_args: MLXServerConfig):
                 await app.state.handler.cleanup()
                 logger.info("Resources cleaned up successfully")
             except Exception as e:
-                logger.error(f"Error during shutdown: {str(e)}")
+                logger.error(f"Error during shutdown: {e!s}")
 
         # Final memory cleanup
         mx.clear_cache()
@@ -338,7 +346,7 @@ def setup_server(config_args: MLXServerConfig) -> uvicorn.Config:
         response with a 500 status code so internal errors do not leak
         implementation details to clients.
         """
-        logger.error(f"Global exception handler caught: {str(exc)}", exc_info=True)
+        logger.error(f"Global exception handler caught: {exc!s}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"error": {"message": "Internal server error", "type": "internal_error"}},

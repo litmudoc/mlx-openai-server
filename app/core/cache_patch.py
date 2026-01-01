@@ -14,7 +14,9 @@ from mlx_lm.models.cache import KVCache, RotatingKVCache
 _PATCHED = False
 
 
-def _new_update_and_fetch(self: RotatingKVCache, keys: mx.array, values: mx.array) -> tuple[mx.array, mx.array]:
+def _new_update_and_fetch(
+    self: RotatingKVCache, keys: mx.array, values: mx.array
+) -> tuple[mx.array, mx.array]:
     """Update cache and fetch state with proper offset tracking.
 
     Parameters
@@ -61,10 +63,10 @@ def _new_state_getter(self: RotatingKVCache) -> tuple[mx.array, mx.array]:
     """
     if self.keys is None or self.values is None:
         raise ValueError("Cache keys or values are not initialized")
-    
+
     if self.offset <= self.max_size:
         return self.keys[..., : self.offset, :], self.values[..., : self.offset, :]
-    elif self.keep:
+    if self.keep:
         keys = mx.concat(
             [
                 self.keys[..., : self.keep, :],
@@ -80,11 +82,10 @@ def _new_state_getter(self: RotatingKVCache) -> tuple[mx.array, mx.array]:
             axis=2,
         )
         return keys, values
-    else:
-        return (
-            self.keys[..., (self.offset - self.max_size) : self.offset, :],
-            self.values[..., (self.offset - self.max_size) : self.offset, :],
-        )
+    return (
+        self.keys[..., (self.offset - self.max_size) : self.offset, :],
+        self.values[..., (self.offset - self.max_size) : self.offset, :],
+    )
 
 
 def apply_cache_patch() -> None:

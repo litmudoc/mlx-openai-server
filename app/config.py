@@ -29,6 +29,7 @@ class MLXServerConfig:
     max_concurrency: int = 1
     max_prompt_cache: int = 4
     cache_min_prefix_length: int = 10
+    cache_min_reuse_ratio: float = 0.25
     queue_timeout: int = 300
     queue_size: int = 100
     disable_auto_resize: bool = False

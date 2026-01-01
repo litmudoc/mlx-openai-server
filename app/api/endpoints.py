@@ -588,7 +588,9 @@ async def handle_stream_response(
             object="chat.completion.chunk",
             created=created_time,
             model=model,
-            choices=[StreamingChoice(index=0, delta=Delta(), finish_reason=finish_reason)],  # type: ignore[call-arg,arg-type]
+            choices=[
+                StreamingChoice(index=0, delta=Delta(role="assistant"), finish_reason=finish_reason)
+            ],  # type: ignore[call-arg,arg-type]
             usage=usage_info,
             request_id=request_id,
         )

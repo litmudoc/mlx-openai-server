@@ -52,15 +52,20 @@ class KVCacheManager:
         Maximum number of cached prompts to store.
     min_prefix_length : int
         Minimum prefix length required for cache reuse. Defaults to 10.
+    min_match_ratio : float
+        Minimum match ratio (prefix_len / new_tokens_len) required for cache reuse.
+        Prevents reusing caches with very low match ratios. Defaults to 0.1 (10%).
     """
 
     def __init__(
         self,
         max_cache_count: int,
         min_prefix_length: int = 10,
+        min_reuse_ratio: float = 0.25,
     ) -> None:
         self.max_cache_count = max_cache_count
         self.min_prefix_length = min_prefix_length
+        self.min_reuse_ratio = min_reuse_ratio
         self.entries: dict[int, CacheEntry] = {}
         self._next_entry_id = 0
         self._lock = asyncio.Lock()
@@ -71,7 +76,7 @@ class KVCacheManager:
 
         logger.debug(
             f"KVCacheManager initialized: max_cache_count={max_cache_count}, "
-            f"min_prefix_length={min_prefix_length}"
+            f"min_prefix_length={min_prefix_length}, min_reuse_ratio={min_reuse_ratio}"
         )
 
     async def find_best_match(self, token_ids: list[int]) -> tuple[Any | None, int, int | None]:
@@ -80,6 +85,12 @@ class KVCacheManager:
         The cache is reusable if it shares a common prefix with the new token
         sequence. If the cached sequence is longer than the matching prefix,
         it will be trimmed before use.
+
+        This implements the llama.cpp cache matching algorithm:
+        1. Calculate reuse_ratio (f_keep) = prefix_len / len(cached_tokens)
+        2. Calculate match_ratio (sim) = prefix_len / len(new_tokens)
+        3. Filter by min_reuse_ratio (default 0.25)
+        4. Select if both metrics are strictly better than current best
 
         Parameters
         ----------
@@ -96,6 +107,8 @@ class KVCacheManager:
             best_entry: CacheEntry | None = None
             best_prefix_len = 0
             best_entry_id: int | None = None
+            best_reuse_ratio = 0.0
+            best_match_ratio = 0.0
 
             for entry in self.entries.values():
                 # Skip locked entries (currently generating)
@@ -113,22 +126,50 @@ class KVCacheManager:
                 # Find longest common prefix
                 prefix_len = self._compute_prefix_length(cached_tokens, token_ids)
 
+                # Calculate metrics
+                # f_keep_cur: Reuse ratio of cached prompt
+                reuse_ratio = prefix_len / len(cached_tokens) if len(cached_tokens) > 0 else 0.0
+                # sim_cur: Similarity with new request
+                match_ratio = prefix_len / len(token_ids) if len(token_ids) > 0 else 0.0
+
                 if prefix_len > 0:
-                    if prefix_len < len(cached_tokens):
-                        logger.info(f"  -> Partial match: {prefix_len} tokens (needs trim)")
-                    else:
-                        logger.info(f"  -> Full prefix match: {prefix_len} tokens")
-                elif len(cached_tokens) > 0 and len(token_ids) > 0:
                     logger.info(
-                        f"  -> Mismatch at position 0: "
-                        f"cached={cached_tokens[0]}, new={token_ids[0]}"
+                        f"  -> Match: {prefix_len} tokens, "
+                        f"reuse_ratio={reuse_ratio:.1%}, match_ratio={match_ratio:.1%}"
                     )
 
-                # Update best match if this prefix is longer and meets minimum
-                if prefix_len >= self.min_prefix_length and prefix_len > best_prefix_len:
+                # Threshold check (llama.cpp: f_keep_cur < 0.25)
+                # We also keep min_prefix_length
+                if prefix_len < self.min_prefix_length:
+                    continue
+
+                if reuse_ratio < self.min_reuse_ratio:
+                    logger.info(
+                        f"  -> Rejected: reuse_ratio {reuse_ratio:.1%} < "
+                        f"min_reuse_ratio {self.min_reuse_ratio:.1%}"
+                    )
+                    continue
+
+                # Find cache with better similarity (aligned with server-context.cpp slot selection)
+                # Priority 1: Longest Common Prefix (Maximize tokens saved)
+                # Priority 2: Higher Reuse Ratio (Tie-breaker: prefer cleaner cache)
+
+                is_better = False
+                if best_entry is None or prefix_len > best_prefix_len:
+                    is_better = True
+                elif prefix_len == best_prefix_len:
+                    if reuse_ratio > best_reuse_ratio:
+                        is_better = True
+
+                if is_better:
                     best_entry = entry
                     best_prefix_len = prefix_len
                     best_entry_id = entry.entry_id
+                    best_reuse_ratio = reuse_ratio
+                    best_match_ratio = match_ratio
+                    logger.info(
+                        f"  -> New best match found: entry_id={entry.entry_id} (LCP={prefix_len})"
+                    )
 
             if best_entry is not None:
                 best_entry.last_used = datetime.now()

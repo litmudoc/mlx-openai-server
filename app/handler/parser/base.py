@@ -1,7 +1,8 @@
 import json
 import logging
+from typing import Any
+
 from json_repair import repair_json
-from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ class BaseThinkingParser:
     def get_thinking_close(self):
         return self.thinking_close
 
-    def parse(self, content: str) -> Tuple[Optional[str], str]:
+    def parse(self, content: str) -> tuple[str | None, str]:
         start_thinking = content.find(self.thinking_open)
         if start_thinking == -1:
             return None, content
@@ -44,7 +45,7 @@ class BaseThinkingParser:
                 return length
         return 0
 
-    def parse_stream(self, chunk: Optional[str] = None) -> Tuple[Optional[Any], bool]:
+    def parse_stream(self, chunk: str | None = None) -> tuple[Any | None, bool]:
         """
         Parse streaming chunks for thinking content.
 
@@ -80,74 +81,67 @@ class BaseThinkingParser:
                     self.is_thinking = True
                     self.buffer = self.buffer[len(self.thinking_open) :]
                     continue
-                else:
-                    # No opening tag found. Check for partial match at end.
-                    partial_len = self._find_partial_match(self.buffer, self.thinking_open)
-                    if partial_len > 0:
-                        # Yield safe part
-                        safe_len = len(self.buffer) - partial_len
-                        if safe_len > 0:
-                            content = self.buffer[:safe_len]
-                            self.buffer = self.buffer[safe_len:]
-                            return content, False
-                        else:
-                            # Entire buffer is a partial match, wait for more data
-                            return None, False
-                    else:
-                        # No partial match, yield everything
-                        content = self.buffer
-                        self.buffer = ""
+                # No opening tag found. Check for partial match at end.
+                partial_len = self._find_partial_match(self.buffer, self.thinking_open)
+                if partial_len > 0:
+                    # Yield safe part
+                    safe_len = len(self.buffer) - partial_len
+                    if safe_len > 0:
+                        content = self.buffer[:safe_len]
+                        self.buffer = self.buffer[safe_len:]
                         return content, False
-            else:
-                # Inside thinking block
-                # Look for closing tag
-                end_idx = self.buffer.find(self.thinking_close)
-                if end_idx != -1:
-                    # Found closing tag
-                    reasoning_content = self.buffer[:end_idx]
-                    self.buffer = self.buffer[end_idx + len(self.thinking_close) :]
-                    self.is_thinking = False
+                    # Entire buffer is a partial match, wait for more data
+                    return None, False
+                # No partial match, yield everything
+                content = self.buffer
+                self.buffer = ""
+                return content, False
+            # Inside thinking block
+            # Look for closing tag
+            end_idx = self.buffer.find(self.thinking_close)
+            if end_idx != -1:
+                # Found closing tag
+                reasoning_content = self.buffer[:end_idx]
+                self.buffer = self.buffer[end_idx + len(self.thinking_close) :]
+                self.is_thinking = False
 
-                    # Yield reasoning content and signal completion
-                    # If buffer has more content (after close), we leave it in buffer.
-                    # Caller handles is_complete=True by disabling parser, so leftover buffer
-                    # should be returned?
-                    # If is_complete=True, the handler sets thinking_parser=None.
-                    # The handler needs to handle the rest of the text.
-                    # But parse_stream is called one last time?
-                    # The handler loop:
-                    # parsed, complete = parser.parse_stream(text)
-                    # if parsed: yield
-                    # if complete: parser = None
-                    # if after_thinking_close_content: text = that
+                # Yield reasoning content and signal completion
+                # If buffer has more content (after close), we leave it in buffer.
+                # Caller handles is_complete=True by disabling parser, so leftover buffer
+                # should be returned?
+                # If is_complete=True, the handler sets thinking_parser=None.
+                # The handler needs to handle the rest of the text.
+                # But parse_stream is called one last time?
+                # The handler loop:
+                # parsed, complete = parser.parse_stream(text)
+                # if parsed: yield
+                # if complete: parser = None
+                # if after_thinking_close_content: text = that
 
-                    # We can use the dictionary return to pass extra content if needed,
-                    # but current BaseThinkingParser logic in handler supports:
-                    # if parsed is dict: after_thinking_close_content = parsed.pop("content")
+                # We can use the dictionary return to pass extra content if needed,
+                # but current BaseThinkingParser logic in handler supports:
+                # if parsed is dict: after_thinking_close_content = parsed.pop("content")
 
-                    res = {"reasoning_content": reasoning_content}
-                    if self.buffer:
-                        res["content"] = self.buffer
-                        self.buffer = ""
+                res = {"reasoning_content": reasoning_content}
+                if self.buffer:
+                    res["content"] = self.buffer
+                    self.buffer = ""
 
-                    return res, True
-                else:
-                    # No closing tag. Check partial match.
-                    partial_len = self._find_partial_match(self.buffer, self.thinking_close)
-                    if partial_len > 0:
-                        # Yield safe reasoning
-                        safe_len = len(self.buffer) - partial_len
-                        if safe_len > 0:
-                            reasoning = self.buffer[:safe_len]
-                            self.buffer = self.buffer[safe_len:]
-                            return {"reasoning_content": reasoning}, False
-                        else:
-                            return None, False
-                    else:
-                        # Yield all as reasoning
-                        reasoning = self.buffer
-                        self.buffer = ""
-                        return {"reasoning_content": reasoning}, False
+                return res, True
+            # No closing tag. Check partial match.
+            partial_len = self._find_partial_match(self.buffer, self.thinking_close)
+            if partial_len > 0:
+                # Yield safe reasoning
+                safe_len = len(self.buffer) - partial_len
+                if safe_len > 0:
+                    reasoning = self.buffer[:safe_len]
+                    self.buffer = self.buffer[safe_len:]
+                    return {"reasoning_content": reasoning}, False
+                return None, False
+            # Yield all as reasoning
+            reasoning = self.buffer
+            self.buffer = ""
+            return {"reasoning_content": reasoning}, False
 
         return None, is_complete
 
@@ -158,7 +152,7 @@ class ParseToolState:
 
 
 class BaseToolParser:
-    def __init__(self, tool_open: str, tool_close: Optional[str] = None):
+    def __init__(self, tool_open: str, tool_close: str | None = None):
         self.tool_open = tool_open
         self.tool_close = tool_close
         self.buffer = ""
@@ -173,16 +167,17 @@ class BaseToolParser:
     def get_tool_close(self):
         return self.tool_close
 
-    def _set_content(self, res: Dict[str, Any], content: str) -> None:
+    def _set_content(self, res: dict[str, Any], content: str) -> None:
         """Helper to set content only if non-empty."""
         res["content"] = content if content else None
 
-    def _parse_tool_content(self, tool_content: str) -> Optional[Dict[str, Any]]:
+    def _parse_tool_content(self, tool_content: str) -> dict[str, Any] | None:
         """
         Parses the content of a tool call. Subclasses can override this method
         to support different content formats (e.g., XML, YAML).
         Args:
             tool_content: The string content extracted from between the tool tags.
+
         Returns:
             A dictionary representing the parsed tool call, or None if parsing fails.
         """
@@ -193,7 +188,7 @@ class BaseToolParser:
         except json.JSONDecodeError:
             raise
 
-    def parse(self, content: str) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+    def parse(self, content: str) -> tuple[list[dict[str, Any]] | None, str]:
         tool_calls = []
         remaining_parts = []
 
@@ -249,7 +244,7 @@ class BaseToolParser:
                 return length
         return 0
 
-    def parse_stream(self, chunk: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], bool]:
+    def parse_stream(self, chunk: str | None = None) -> tuple[dict[str, Any] | None, bool]:
         """
         Parse streaming chunks for tool calls.
         Args:
@@ -280,32 +275,29 @@ class BaseToolParser:
                         return res, True
                     # If no content, continue loop to process tool immediately
                     continue
-                else:
-                    # Check partial match
-                    partial_len = self._find_partial_match(self.buffer, self.tool_open)
-                    if partial_len > 0:
-                        # Yield safe part
-                        safe_len = len(self.buffer) - partial_len
-                        if safe_len > 0:
-                            content = self.buffer[:safe_len]
-                            self.buffer = self.buffer[safe_len:]
-                            self._set_content(res, content)
-                            return res, True
-                        else:
-                            # Buffer is all partial, wait
-                            return None, True  # Using True to signal "no error, just waiting"?
-                            # Wait, handler usage: `if is_complete: yield parsed`.
-                            # So if we return None, True -> yields None (filtered out).
-                            # Correct.
-                            return None, True
-                    else:
-                        # Yield all
-                        content = self.buffer
-                        self.buffer = ""
+                # Check partial match
+                partial_len = self._find_partial_match(self.buffer, self.tool_open)
+                if partial_len > 0:
+                    # Yield safe part
+                    safe_len = len(self.buffer) - partial_len
+                    if safe_len > 0:
+                        content = self.buffer[:safe_len]
+                        self.buffer = self.buffer[safe_len:]
                         self._set_content(res, content)
                         return res, True
+                    # Buffer is all partial, wait
+                    return None, True  # Using True to signal "no error, just waiting"?
+                    # Wait, handler usage: `if is_complete: yield parsed`.
+                    # So if we return None, True -> yields None (filtered out).
+                    # Correct.
+                    return None, True
+                # Yield all
+                content = self.buffer
+                self.buffer = ""
+                self._set_content(res, content)
+                return res, True
 
-            elif self.state == ParseToolState.FOUND_PREFIX:
+            if self.state == ParseToolState.FOUND_PREFIX:
                 # Look for tool_close
                 end_idx = self.buffer.find(self.tool_close)
                 if end_idx != -1:
@@ -339,9 +331,8 @@ class BaseToolParser:
                         # We are buffering tool content. Do NOT yield partials.
                         # Wait for full close tag.
                         return None, True
-                    else:
-                        # Still buffering.
-                        return None, True
+                    # Still buffering.
+                    return None, True
 
         return None, True
 
@@ -355,7 +346,7 @@ Provides generic conversion from OpenAI API message format to model-compatible f
 class BaseMessageConverter:
     """Base message format converter class"""
 
-    def convert_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert message format to be compatible with specific model chat templates"""
         converted_messages = []
 
@@ -366,7 +357,7 @@ class BaseMessageConverter:
 
         return converted_messages
 
-    def _convert_single_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_single_message(self, message: dict[str, Any]) -> dict[str, Any]:
         """Convert a single message"""
         if not isinstance(message, dict):
             return message
@@ -378,7 +369,7 @@ class BaseMessageConverter:
 
         return message
 
-    def _convert_tool_calls(self, tool_calls: List[Dict[str, Any]]) -> None:
+    def _convert_tool_calls(self, tool_calls: list[dict[str, Any]]) -> None:
         """Convert arguments format in tool calls"""
         for tool_call in tool_calls:
             if isinstance(tool_call, dict) and "function" in tool_call:

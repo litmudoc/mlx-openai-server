@@ -81,7 +81,6 @@ def cli():
     Subcommands (such as ``launch``) are registered on this group and
     invoked by the console entry point.
     """
-    pass
 
 
 @cli.command()
@@ -121,6 +120,12 @@ def cli():
     type=int,
     help="Minimum prefix length required for cache reuse (default: 10)",
 )
+@click.option(
+    "--cache-min-reuse-ratio",
+    default=0.25,
+    type=float,
+    help="Minimum reuse ratio (prefix_len/cached_tokens_len) required for cache reuse (default: 0.25)",
+)
 @click.option("--queue-timeout", default=300, type=int, help="Request timeout in seconds")
 @click.option("--queue-size", default=100, type=int, help="Maximum queue size for pending requests")
 @click.option(
@@ -132,7 +137,18 @@ def cli():
 @click.option(
     "--config-name",
     default=None,
-    type=click.Choice(["flux-schnell", "flux-dev", "flux-krea-dev", "flux-kontext-dev", "qwen-image", "qwen-image-edit", "z-image-turbo", "fibo"]),
+    type=click.Choice(
+        [
+            "flux-schnell",
+            "flux-dev",
+            "flux-krea-dev",
+            "flux-kontext-dev",
+            "qwen-image",
+            "qwen-image-edit",
+            "z-image-turbo",
+            "fibo",
+        ]
+    ),
     help="Config name of the model. Only used for image-generation and image-edit models.",
 )
 @click.option(
@@ -206,6 +222,7 @@ def launch(
     max_concurrency,
     max_prompt_cache,
     cache_min_prefix_length,
+    cache_min_reuse_ratio,
     queue_timeout,
     queue_size,
     quantize,
@@ -238,6 +255,7 @@ def launch(
         max_concurrency=max_concurrency,
         max_prompt_cache=max_prompt_cache,
         cache_min_prefix_length=cache_min_prefix_length,
+        cache_min_reuse_ratio=cache_min_reuse_ratio,
         queue_timeout=queue_timeout,
         queue_size=queue_size,
         quantize=quantize,
