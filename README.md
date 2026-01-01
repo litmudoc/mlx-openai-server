@@ -26,8 +26,6 @@
 - [예제 노트북 (Example Notebooks)](#예제-노트북-example-notebooks)
 - [대규모 모델 (Large Models)](#대규모-모델-large-models)
 - [라이선스 (License)](#라이선스-license)
-- [지원 (Support)](#지원-support)
-- [감사의 말 (Acknowledgments)](#감사의-말-acknowledgments)
 
 ---
 
