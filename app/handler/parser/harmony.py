@@ -1,8 +1,15 @@
 from enum import Enum
+from functools import lru_cache
 import logging
 from typing import Any
 
-from openai_harmony import HarmonyEncodingName, Role, StreamableParser, load_harmony_encoding
+from openai_harmony import (
+    HarmonyEncodingName,
+    Role,
+    StreamState,
+    StreamableParser,
+    load_harmony_encoding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +32,28 @@ class ParsingState(Enum):
 
 
 # Harmony Parsing Helper Functions
+@lru_cache(maxsize=2)
+def get_harmony_stop_sequences(include_message_end: bool = True) -> list[str]:
+    """Return Harmony stop sequences for GPT-OSS completions.
+
+    Parameters
+    ----------
+    include_message_end : bool
+        Whether to include <|end|> (message terminator) as a stop sequence.
+
+    Returns
+    -------
+    list[str]
+        Stop sequences decoded from the Harmony encoding.
+    """
+    enc = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+    if include_message_end:
+        token_ids = enc.stop_tokens()
+    else:
+        token_ids = enc.stop_tokens_for_assistant_actions()
+    return [enc.decode([token_id]) for token_id in token_ids]
+
+
 class HarmonyParser:
     """
     Enhanced helper class for parsing GPT-OSS model responses using harmony encoding.
@@ -61,6 +90,15 @@ class HarmonyParser:
         self._current_function_name = None
         self._function_arguments = []
 
+    def _reset_stream_parser(self) -> None:
+        """Reset the stream parser to a fresh state for resynchronization."""
+        self.parser = StreamableParser(self.enc, role=Role.ASSISTANT)
+
+    def _should_resync(self, token_error: Exception) -> bool:
+        """Check whether a token parsing error should trigger a resync."""
+        message = str(token_error)
+        return "expecting start token" in message or "message header" in message
+
     def parse_stream(self, text: str | None = None) -> tuple[Any | None, bool]:
         """
         Parse streaming text input and return parsing state and extracted content.
@@ -76,12 +114,11 @@ class HarmonyParser:
         Raises:
             Exception: If encoding or parsing fails
         """
-        # Handle end of stream marker
+        # Handle end of stream marker without skipping parser state updates
         if text == self.end_tool_chunk:
             logger.debug("End tool chunk detected, marking stream as ended")
             self.end_stream = True
             self.parsing_state = ParsingState.STREAM_ENDED
-            return None, True
 
         # Handle empty or None text
         if not text:
@@ -89,6 +126,23 @@ class HarmonyParser:
 
         try:
             self.parsing_state = ParsingState.PROCESSING_TOKENS
+            if self.parser.state in {StreamState.EXPECT_START, StreamState.HEADER}:
+                if "<|start|>" in text:
+                    start_index = text.find("<|start|>")
+                    if start_index > 0:
+                        logger.debug("Dropping %d chars before harmony start token", start_index)
+                        text = text[start_index:]
+                else:
+                    tool_index = text.find(" to=functions.")
+                    channel_index = text.find("<|channel|>")
+                    candidates = [idx for idx in (tool_index, channel_index) if idx >= 0]
+                    if candidates:
+                        start_at = min(candidates)
+                        if start_at > 0:
+                            logger.debug(
+                                "Dropping %d chars before harmony content token", start_at
+                            )
+                        text = text[start_at:]
             text_tokens = self.enc.encode(text, allowed_special="all")
 
             # Initialize local variables for this chunk
@@ -97,54 +151,66 @@ class HarmonyParser:
             function_arguments: list[str] = []
             reasoning_content: list[str] = []
             current_channel: str | None = None
+            last_content_channel: str | None = None
 
             # Process each token
             for text_token in text_tokens:
-                try:
-                    stream_text = self.parser.process(text_token)
-                    current_channel = stream_text.current_channel
-                    content = stream_text.last_content_delta
+                for attempt in range(2):
+                    try:
+                        stream_text = self.parser.process(text_token)
+                        current_channel = stream_text.current_channel
+                        content = stream_text.last_content_delta
 
-                    if not content:
-                        continue
+                        if not content:
+                            break
+                        last_content_channel = current_channel
 
-                    # Handle different channels
-                    if current_channel == ChannelType.ANALYSIS.value:
-                        reasoning_content.append(content)
-                        self._accumulated_content[ChannelType.ANALYSIS.value].append(content)
+                        # Handle different channels
+                        if current_channel == ChannelType.ANALYSIS.value:
+                            reasoning_content.append(content)
+                            self._accumulated_content[ChannelType.ANALYSIS.value].append(content)
 
-                    elif current_channel == ChannelType.COMMENTARY.value:
-                        self.parsing_state = ParsingState.TOOL_PARSING
+                        elif current_channel == ChannelType.COMMENTARY.value:
+                            self.parsing_state = ParsingState.TOOL_PARSING
 
-                        if self.tool_state:
-                            # Already parsing function arguments
-                            function_arguments.append(content)
-                            self._function_arguments.append(content)
-                        else:
-                            # Start of new function call
-                            self.tool_state = True
-                            if (
-                                hasattr(stream_text, "current_recipient")
-                                and stream_text.current_recipient
-                            ):
-                                function_name = stream_text.current_recipient.replace(
-                                    "functions.", ""
-                                )
-                                self._current_function_name = function_name
-                            function_arguments = [content]
-                            self._function_arguments = [content]
+                            if self.tool_state:
+                                # Already parsing function arguments
+                                function_arguments.append(content)
+                                self._function_arguments.append(content)
+                            else:
+                                # Start of new function call
+                                self.tool_state = True
+                                if (
+                                    hasattr(stream_text, "current_recipient")
+                                    and stream_text.current_recipient
+                                ):
+                                    function_name = stream_text.current_recipient.replace(
+                                        "functions.", ""
+                                    )
+                                    self._current_function_name = function_name
+                                function_arguments = [content]
+                                self._function_arguments = [content]
 
-                    elif current_channel == ChannelType.FINAL.value:
-                        contents.append(content)
-                        self._accumulated_content[ChannelType.FINAL.value].append(content)
+                        elif current_channel == ChannelType.FINAL.value:
+                            contents.append(content)
+                            self._accumulated_content[ChannelType.FINAL.value].append(content)
+                        break
 
-                except Exception as token_error:
-                    logger.warning(f"Error processing token {text_token}: {token_error}")
-                    continue
+                    except Exception as token_error:
+                        if attempt == 0 and self._should_resync(token_error):
+                            logger.debug(
+                                "Resynchronizing harmony stream after token error: %s",
+                                token_error,
+                            )
+                            self._reset_stream_parser()
+                            continue
+                        logger.warning(f"Error processing token {text_token}: {token_error}")
+                        break
 
             # Return appropriate response based on current channel
+            resolved_channel = current_channel or last_content_channel
             return self._build_response(
-                current_channel,
+                resolved_channel,
                 {
                     "reasoning_content": reasoning_content,
                     "function_name": function_name,

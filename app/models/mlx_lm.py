@@ -19,6 +19,7 @@ from mlx_lm.utils import load
 from outlines.processors import JSONLogitsProcessor
 
 from ..core.service_llm_engine import ServiceLLMEngine
+from ..core.gpt_oss_patch import patch_gpt_oss_model
 from ..utils.outlines_transformer_tokenizer import OutlinesTransformerTokenizer
 
 DEFAULT_TEMPERATURE = os.getenv("DEFAULT_TEMPERATURE", 0.7)
@@ -138,6 +139,9 @@ class MLX_LM:
                 lazy=False,
                 tokenizer_config={"trust_remote_code": trust_remote_code},
             )
+
+            patch_gpt_oss_model(self.model)
+
             self.pad_token_id = self.tokenizer.pad_token_id
             self.bos_token = self.tokenizer.bos_token
             self.model_type = self.model.model_type

@@ -25,6 +25,7 @@ from ..models.mlx_lm import MLX_LM
 from ..schemas.openai import ChatCompletionRequest, EmbeddingRequest, UsageInfo
 from ..utils.errors import create_error_response
 from .parser import ParserFactory
+from .parser.harmony import get_harmony_stop_sequences
 
 
 class MLXLMHandler:
@@ -952,6 +953,7 @@ class MLXLMHandler:
 
             # Add all non-system messages after the merged system message
             chat_messages.extend(non_system_messages)
+            self._ensure_harmony_stop_sequences(request_dict)
             return chat_messages, request_dict
 
         except Exception as e:
@@ -960,3 +962,37 @@ class MLXLMHandler:
                 f"Failed to process request: {e!s}", "bad_request", HTTPStatus.BAD_REQUEST
             )
             raise HTTPException(status_code=400, detail=content)
+
+    def _ensure_harmony_stop_sequences(self, request_dict: dict[str, Any]) -> None:
+        """Inject Harmony stop sequences when Harmony parsing is enabled.
+
+        Parameters
+        ----------
+        request_dict : dict[str, Any]
+            Request data to update with Harmony stop sequences.
+        """
+        if self.reasoning_parser != "harmony" and self.tool_call_parser != "harmony":
+            return
+
+        stop_sequences = request_dict.get("stop") or []
+        if isinstance(stop_sequences, str):
+            stop_sequences = [stop_sequences]
+        if not isinstance(stop_sequences, list):
+            logger.warning("Unexpected stop sequence type, skipping Harmony stop injection.")
+            return
+
+        tools_present = bool(request_dict.get("chat_template_kwargs", {}).get("tools"))
+        harmony_stops = get_harmony_stop_sequences(include_message_end=not tools_present)
+        for stop_sequence in harmony_stops:
+            if stop_sequence not in stop_sequences:
+                stop_sequences.append(stop_sequence)
+        if tools_present and "<|end|>" in stop_sequences:
+            logger.debug("Removing <|end|> stop sequence to allow Harmony tool calls.")
+            stop_sequences = [seq for seq in stop_sequences if seq != "<|end|>"]
+
+        logger.debug(
+            "Harmony stop sequences applied. tools_present=%s stop=%s",
+            tools_present,
+            stop_sequences,
+        )
+        request_dict["stop"] = stop_sequences

@@ -210,6 +210,12 @@ class ChatCompletionRequestBase(OpenAIBaseModel):
     tool_choice: str | dict[str, Any] | None = Field(
         "auto", description="Tool choice for the request."
     )
+    functions: list[dict[str, Any]] | None = Field(
+        None, description="Legacy functions list (OpenAI-compatible)."
+    )
+    function_call: str | dict[str, Any] | None = Field(
+        None, description="Legacy function_call selection (OpenAI-compatible)."
+    )
     max_tokens: int | None = Field(None, description="The maximum number of tokens to generate.")
     temperature: float | None = Field(0.7, description="Sampling temperature.")
     top_p: float | None = Field(1.0, description="Nucleus sampling probability.")
@@ -271,6 +277,38 @@ class ChatCompletionRequestBase(OpenAIBaseModel):
             if v <= 0:
                 raise ValueError("max_tokens must be positive")
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_legacy_tool_fields(cls, data: Any) -> Any:
+        """Map legacy function fields to the modern tools schema.
+
+        Parameters
+        ----------
+        data : Any
+            Incoming request payload.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        functions = data.get("functions")
+        tools = data.get("tools")
+        if functions and not tools:
+            normalized_tools = []
+            for fn in functions:
+                if not isinstance(fn, dict):
+                    continue
+                if "type" in fn:
+                    normalized_tools.append(fn)
+                else:
+                    normalized_tools.append({"type": "function", "function": fn})
+            data["tools"] = normalized_tools
+
+        function_call = data.get("function_call")
+        if function_call is not None and data.get("tool_choice") in (None, "auto"):
+            data["tool_choice"] = function_call
+
+        return data
 
 
 class ChatTemplateKwargs(OpenAIBaseModel):

@@ -49,11 +49,10 @@ def _make_patched_call():
         This fixes the mask broadcasting issue by generating attention masks
         for each layer individually based on its specific cache state.
 
-        Key fix: For sliding window layers, use "causal" string mask instead of
-        array mask. The RotatingKVCache already limits storage to window_size,
-        so the causal mask correctly restricts attention to available keys.
-        Array masks cause shape mismatches: create_causal_mask returns (N, offset+N)
-        but attention expects (N, min(offset+N, window_size)).
+        Key fix: For sliding window layers, we generate an explicit mask that:
+        1. Respects the physical shape of RotatingKVCache (avoiding broadcast errors)
+        2. Uses global offsets to maintain correct context visibility
+        3. Properly handles the sliding window constraint
         """
         if input_embeddings is not None:
             x = input_embeddings
@@ -69,18 +68,48 @@ def _make_patched_call():
                 # Full attention: use standard mask generation
                 mask = create_attention_mask(x, c)
             else:
-                # Sliding window attention: use "causal" string mask
-                # RotatingKVCache already limits kv storage to window_size,
-                # so causal mask correctly restricts attention scope.
-                # Array masks from create_causal_mask have wrong shape:
-                # (N, offset+N) vs expected (N, actual_kv_len)
+                # Sliding window attention
                 N = x.shape[1]
                 if N == 1:
                     # Single token decode: no mask needed
                     mask = None
                 else:
-                    # Prefill: use causal string, MLX handles internally
-                    mask = "causal"
+                    # Prefill: Generate explicit mask based on global positions
+                    # See analysis/gpt_oss_chunked_prefill_issue.md
+                    
+                    # Determine offset and window size
+                    if c is not None:
+                        current_offset = c.offset
+                        window_size = c.max_size
+                    else:
+                        current_offset = 0
+                        window_size = self.window_size
+
+                    # Calculate L: size of keys after update
+                    # Keys will be truncated to window_size if they exceed it
+                    L = min(current_offset + N, window_size)
+
+                    # Generate indices
+                    # Queries: [current_offset, ..., current_offset + N - 1]
+                    queries_pos = mx.arange(N) + current_offset
+                    
+                    # Keys: [current_offset + N - L, ..., current_offset + N - 1]
+                    # This maps physical indices 0..L-1 to global positions
+                    keys_pos = mx.arange(L) + (current_offset + N - L)
+                    
+                    # Broadcast for comparison
+                    queries_pos = queries_pos[:, None]
+                    keys_pos = keys_pos[None, :]
+                    
+                    # Mask conditions:
+                    # 1. Causal: keys must be in the past or present relative to query
+                    # 2. Window: keys must be within window_size of query
+                    mask_bool = (keys_pos <= queries_pos) & (keys_pos > (queries_pos - window_size))
+                    
+                    # Create additive mask (-inf for masked, 0 for allowed)
+                    mask = mx.where(mask_bool, 0, -float("inf"))
+                    mask = mask.astype(x.dtype)
+
             x = layer(x, mask, c)
 
         return self.norm(x)
@@ -155,4 +184,6 @@ def is_gpt_oss_model(model: Model) -> bool:
     """
     if not hasattr(model, "model"):
         return False
-    return model.model.__class__.__name__ == "GptOssMoeModel"
+    
+    class_name = model.model.__class__.__name__
+    return "gptoss" in class_name.lower() or class_name == "GptOssMoeModel"

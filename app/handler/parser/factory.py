@@ -10,28 +10,20 @@ from typing import Any
 
 from loguru import logger
 
-from . import (
+from .glm4_moe import (
+    Glm4MoEMessageConverter,
     Glm4MoEThinkingParser,
     Glm4MoEToolParser,
-    HarmonyParser,
-    HermesThinkingParser,
-    HermesToolParser,
-    Llama4PythonicToolParser,
-    MinimaxThinkingParser,
-    MinimaxToolParser,
-    Ministral3ThinkingParser,
-    Ministral3ToolParser,
-    Qwen3MoEThinkingParser,
-    Qwen3MoEToolParser,
-    Qwen3NextThinkingParser,
-    Qwen3NextToolParser,
-    Qwen3ThinkingParser,
-    Qwen3ToolParser,
-    Qwen3VLThinkingParser,
-    Qwen3VLToolParser,
 )
-from .glm4_moe import Glm4MoEMessageConverter
-from .minimax import MiniMaxMessageConverter
+from .harmony import HarmonyParser
+from .hermes import HermesThinkingParser, HermesToolParser
+from .llama4_pythonic import Llama4PythonicToolParser
+from .minimax import MiniMaxMessageConverter, MinimaxThinkingParser, MinimaxToolParser
+from .ministral3 import Ministral3ThinkingParser, Ministral3ToolParser
+from .qwen3 import Qwen3ThinkingParser, Qwen3ToolParser
+from .qwen3_moe import Qwen3MoEThinkingParser, Qwen3MoEToolParser
+from .qwen3_next import Qwen3NextThinkingParser, Qwen3NextToolParser
+from .qwen3_vl import Qwen3VLThinkingParser, Qwen3VLToolParser
 
 # Registry mapping parser names to their classes
 PARSER_REGISTRY: dict[str, dict[str, Callable]] = {
