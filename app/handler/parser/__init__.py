@@ -10,6 +10,7 @@ from .qwen3 import Qwen3ThinkingParser, Qwen3ToolParser
 from .qwen3_moe import Qwen3MoEThinkingParser, Qwen3MoEToolParser
 from .qwen3_next import Qwen3NextThinkingParser, Qwen3NextToolParser
 from .qwen3_vl import Qwen3VLThinkingParser, Qwen3VLToolParser
+from .solar_open import SolarOpenThinkingParser, SolarOpenToolParser
 
 __all__ = [
     "BaseToolParser",
@@ -32,5 +33,7 @@ __all__ = [
     "Llama4PythonicToolParser",
     "Ministral3ThinkingParser",
     "Ministral3ToolParser",
+    "SolarOpenToolParser",
+    "SolarOpenThinkingParser",
     "ParserFactory",
 ]

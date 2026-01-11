@@ -10,11 +10,7 @@ from typing import Any
 
 from loguru import logger
 
-from .glm4_moe import (
-    Glm4MoEMessageConverter,
-    Glm4MoEThinkingParser,
-    Glm4MoEToolParser,
-)
+from .glm4_moe import Glm4MoEMessageConverter, Glm4MoEThinkingParser, Glm4MoEToolParser
 from .harmony import HarmonyParser
 from .hermes import HermesThinkingParser, HermesToolParser
 from .llama4_pythonic import Llama4PythonicToolParser
@@ -24,6 +20,7 @@ from .qwen3 import Qwen3ThinkingParser, Qwen3ToolParser
 from .qwen3_moe import Qwen3MoEThinkingParser, Qwen3MoEToolParser
 from .qwen3_next import Qwen3NextThinkingParser, Qwen3NextToolParser
 from .qwen3_vl import Qwen3VLThinkingParser, Qwen3VLToolParser
+from .solar_open import SolarOpenThinkingParser, SolarOpenToolParser
 
 # Registry mapping parser names to their classes
 PARSER_REGISTRY: dict[str, dict[str, Callable]] = {
@@ -65,6 +62,10 @@ PARSER_REGISTRY: dict[str, dict[str, Callable]] = {
     "ministral3": {
         "thinking": Ministral3ThinkingParser,
         "tool": Ministral3ToolParser,
+    },
+    "solar_open": {
+        "thinking": SolarOpenThinkingParser,
+        "tool": SolarOpenToolParser,
     },
 }
 
@@ -117,6 +118,11 @@ PARSER_METADATA: dict[str, dict[str, Any]] = {
         "has_special_parsing": False,
     },
     "llama4_pythonic": {
+        "respects_enable_thinking": False,
+        "needs_redacted_reasoning_prefix": False,
+        "has_special_parsing": False,
+    },
+    "solar_open": {
         "respects_enable_thinking": False,
         "needs_redacted_reasoning_prefix": False,
         "has_special_parsing": False,
