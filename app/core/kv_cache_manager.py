@@ -79,7 +79,9 @@ class KVCacheManager:
             f"min_prefix_length={min_prefix_length}, min_reuse_ratio={min_reuse_ratio}"
         )
 
-    async def find_best_match(self, token_ids: list[int]) -> tuple[Any | None, int, int | None]:
+    async def find_best_match(
+        self, token_ids: list[int]
+    ) -> tuple[Any | None, int, int | None, int | None]:
         """Find cache with longest matching prefix (non-locked entries only).
 
         The cache is reusable if it shares a common prefix with the new token
@@ -99,9 +101,9 @@ class KVCacheManager:
 
         Returns
         -------
-        tuple[Any | None, int, int | None]
-            A tuple of (cache, prefix_length, entry_id).
-            Returns (None, 0, None) if no suitable match found.
+        tuple[Any | None, int, int | None, int | None]
+            A tuple of (cache, prefix_length, entry_id, cached_tokens_len).
+            Returns (None, 0, None, None) if no suitable match found.
         """
         async with self._lock:
             best_entry: CacheEntry | None = None
@@ -179,11 +181,12 @@ class KVCacheManager:
                     f"Cache hit: entry_id={best_entry_id}, "
                     f"prefix_len={best_prefix_len}/{len(token_ids)}"
                 )
-                return best_entry.cache, best_prefix_len, best_entry_id
+                cached_tokens_len = len(best_entry.token_ids)
+                return best_entry.cache, best_prefix_len, best_entry_id, cached_tokens_len
 
             self._misses += 1
             logger.debug("Cache miss: no matching prefix found")
-            return None, 0, None
+            return None, 0, None, None
 
     @staticmethod
     def _compute_prefix_length(seq1: list[int], seq2: list[int]) -> int:

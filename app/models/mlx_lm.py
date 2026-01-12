@@ -18,6 +18,7 @@ from mlx_lm.sample_utils import make_repetition_penalty, make_sampler
 from mlx_lm.utils import load
 from outlines.processors import JSONLogitsProcessor
 
+from ..core.cache_utils import resolve_cache_offset
 from ..core.service_llm_engine import ServiceLLMEngine
 from ..core.gpt_oss_patch import patch_gpt_oss_model
 from ..utils.outlines_transformer_tokenizer import OutlinesTransformerTokenizer
@@ -423,6 +424,7 @@ class MLX_LM:
             - min_p: Min-p sampling parameter (default: 0.0)
             - seed: Random seed (default: 0)
             - max_tokens: Maximum tokens to generate (default: 8192)
+            - cache_offset: Explicit cache offset override (default: None)
 
         Returns
         -------
@@ -479,7 +481,7 @@ class MLX_LM:
             input_tokens = input_tokens.input_ids
 
         # Extract cache offset to determine cached tokens for repetition penalty
-        cache_offset = prompt_cache[0].offset if prompt_cache else 0
+        cache_offset = resolve_cache_offset(prompt_cache, kwargs.get("cache_offset"))
 
         # Calculate cached tokens for proper repetition penalty
         # This ensures that when cache is reused, repetition penalty considers

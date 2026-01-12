@@ -7,6 +7,7 @@ models with KVCache reuse support for improved performance.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from collections.abc import AsyncGenerator
 import gc
 from http import HTTPStatus
@@ -18,6 +19,7 @@ from fastapi import HTTPException
 from loguru import logger
 from mlx_lm.models.cache import make_prompt_cache
 
+from ..core.cache_utils import cache_has_offset, resolve_cache_offset
 from ..core.kv_cache_manager import KVCacheManager
 from ..core.queue import RequestQueue
 from ..core.service_llm_engine import GenerationContext
@@ -331,6 +333,7 @@ class MLXLMHandler:
             model_params.pop("_cached_kv", None)
             model_params.pop("_input_tokens", None)
             model_params.pop("_entry_id", None)
+            model_params.pop("_cache_offset", None)
 
             # Helper to put items in queue safely
             def put_in_queue(item):
@@ -351,6 +354,7 @@ class MLXLMHandler:
                 "_input_tokens"
             )  # This might be None if cache lookup failed or wasn't done?
             entry_id = request_data.get("_entry_id")
+            cache_offset = request_data.get("_cache_offset")
 
             # Fallback if input_tokens not provided (shouldn't happen with updated logic)
             if input_tokens is None:
@@ -371,6 +375,7 @@ class MLXLMHandler:
                 stream=stream,
                 prompt_cache=cached_kv,
                 context=context,
+                cache_offset=cache_offset,
                 **model_params,
             )
 
@@ -519,6 +524,7 @@ class MLXLMHandler:
                 if not chunk_text:
                     continue
 
+                self._log_solar_open_stream_chunk(chunk_text)
                 completion_chunks.append(chunk_text)
                 text = chunk_text
 
@@ -595,6 +601,22 @@ class MLXLMHandler:
             raise HTTPException(status_code=500, detail=content)
         finally:
             context.cancel()
+
+    def _log_solar_open_stream_chunk(self, chunk_text: str) -> None:
+        """Append raw stream chunks to the Solar Open debug log file.
+
+        Parameters
+        ----------
+        chunk_text : str
+            The raw chunk text emitted by the model stream.
+        """
+        try:
+            log_path = Path("./logs/solar_open_raw.log")
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(chunk_text)
+        except (OSError, UnicodeError) as exc:
+            logger.warning(f"Failed to write solar open raw stream log: {exc!s}")
 
     async def generate_text_response(self, request: ChatCompletionRequest) -> dict[str, Any]:
         """
@@ -787,45 +809,68 @@ class MLXLMHandler:
                 input_tokens = input_tokens.input_ids
 
             # Find matching cache
-            cached_kv, prefix_len, entry_id = await self.cache_manager.find_best_match(input_tokens)
+            cached_kv, prefix_len, entry_id, cached_tokens_len = (
+                await self.cache_manager.find_best_match(input_tokens)
+            )
 
             if cached_kv:
-                # Verify cache offset matches expected prefix length
-                cache_offset = cached_kv[0].offset if cached_kv else 0
+                if cache_has_offset(cached_kv):
+                    # Verify cache offset matches expected prefix length
+                    cache_offset = resolve_cache_offset(cached_kv)
 
-                if cache_offset == prefix_len:
-                    # Perfect match - cache ready to use
-                    logger.info(
-                        f"Cache hit: reusing {prefix_len}/{len(input_tokens)} tokens "
-                        f"({prefix_len / len(input_tokens) * 100:.1f}%), "
-                        f"cache_offset={cache_offset}"
-                    )
-                elif cache_offset > prefix_len:
-                    # Cache has more tokens than needed - trim to exact prefix length
-                    trim_amount = cache_offset - prefix_len
-                    logger.info(
-                        f"Cache hit with trim: {prefix_len}/{len(input_tokens)} tokens, "
-                        f"trimming {trim_amount} tokens (offset {cache_offset} -> {prefix_len})"
-                    )
-                    for layer_cache in cached_kv:
-                        if hasattr(layer_cache, "trim"):
-                            layer_cache.trim(trim_amount)
+                    if cache_offset == prefix_len:
+                        # Perfect match - cache ready to use
+                        logger.info(
+                            f"Cache hit: reusing {prefix_len}/{len(input_tokens)} tokens "
+                            f"({prefix_len / len(input_tokens) * 100:.1f}%), "
+                            f"cache_offset={cache_offset}"
+                        )
+                    elif cache_offset > prefix_len:
+                        # Cache has more tokens than needed - trim to exact prefix length
+                        trim_amount = cache_offset - prefix_len
+                        logger.info(
+                            f"Cache hit with trim: {prefix_len}/{len(input_tokens)} tokens, "
+                            f"trimming {trim_amount} tokens (offset {cache_offset} -> {prefix_len})"
+                        )
+                        for layer_cache in cached_kv:
+                            if hasattr(layer_cache, "trim"):
+                                layer_cache.trim(trim_amount)
+                        cache_offset = prefix_len
+                    else:
+                        # cache_offset < prefix_len - shouldn't happen with our matching logic
+                        logger.warning(
+                            f"Cache offset too small: offset={cache_offset}, "
+                            f"prefix_len={prefix_len}. Creating fresh cache."
+                        )
+                        cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
+                        entry_id = None
+                        cache_offset = 0
                 else:
-                    # cache_offset < prefix_len - shouldn't happen with our matching logic
-                    logger.warning(
-                        f"Cache offset too small: offset={cache_offset}, prefix_len={prefix_len}. "
-                        "Creating fresh cache."
-                    )
-                    cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
-                    entry_id = None
+                    if cached_tokens_len is None or prefix_len != cached_tokens_len:
+                        logger.info(
+                            "Cache hit requires trimming, but cache has no offset metadata. "
+                            "Creating fresh cache."
+                        )
+                        cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
+                        entry_id = None
+                        cache_offset = 0
+                    else:
+                        cache_offset = resolve_cache_offset(cached_kv, prefix_len)
+                        logger.info(
+                            f"Cache hit: reusing {prefix_len}/{len(input_tokens)} tokens "
+                            f"({prefix_len / len(input_tokens) * 100:.1f}%) "
+                            "with non-offset cache"
+                        )
             else:
                 logger.info("Cache miss: creating fresh cache")
                 cached_kv = make_prompt_cache(self.model.model, self.model.max_kv_size)
+                cache_offset = 0
 
             # Pass prepared data to thread
             request_data["_cached_kv"] = cached_kv
             request_data["_input_tokens"] = input_tokens
             request_data["_entry_id"] = entry_id
+            request_data["_cache_offset"] = cache_offset
 
             # Offload to thread
             loop = asyncio.get_running_loop()
